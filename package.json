@@ -21,7 +21,8 @@
     "mcp": "node dist-electron/mcp-server.cjs",
     "mock:pve": "node scripts/mock-pve.mjs",
     "smoke": "node scripts/agent-smoke.mjs",
-    "preflight": "npm run typecheck && npm run build && npm run smoke",
+    "test": "node tests/run-edge-tests.mjs",
+    "preflight": "npm run typecheck && npm run build && npm test && npm run smoke",
     "ui:mock": "vite --port 5173"
   },
   "devDependencies": {
