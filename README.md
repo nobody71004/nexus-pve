@@ -4,7 +4,8 @@ A portable Windows desktop console for Proxmox VE and Linux fleets. It combines 
 
 ## Download
 
-The current portable build is attached to the [latest release](../../releases/latest).
+- [NexusPVE-1.0.0-portable.exe](./NexusPVE-1.0.0-portable.exe) — 75.2 MB
+- SHA-256: `41d5ae47ab9d6e39f940fc06a166d6ba8e18d463ed224d58d9c0ba9737f81889`
 
 - Windows 10/11 x64
 - No installer and no Node.js runtime required
