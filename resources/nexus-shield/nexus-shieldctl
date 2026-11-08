@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""nexus-shieldctl — control the local Nexus Shield daemon.
+
+Runs on the edge host. Reads the bearer token from /etc/nexus-shield/config.json,
+so it only works as root (the file is 0600). The desktop app reaches this over
+SSH; nothing here is exposed publicly.
+"""
+from __future__ import annotations
+
+import json
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+CONFIG = Path("/etc/nexus-shield/config.json")
+
+
+def endpoint() -> tuple[str, str]:
+    try:
+        cfg = json.loads(CONFIG.read_text())
+    except OSError as exc:
+        raise SystemExit(f"nexus-shield is not installed: {exc}") from exc
+    return f"http://127.0.0.1:{int(cfg.get('apiPort', 8791))}", str(cfg.get("apiToken", ""))
+
+
+def call(method: str, path: str, body: dict | None = None) -> str:
+    base, token = endpoint()
+    data = json.dumps(body).encode() if body is not None else None
+    request = urllib.request.Request(
+        base + path,
+        method=method,
+        data=data,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return response.read().decode()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="replace")
+        raise SystemExit(f"nexus-shield rejected the request ({exc.code}): {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise SystemExit(f"nexus-shield daemon is unreachable: {exc.reason}") from exc
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) < 2:
+        print("usage: nexus-shieldctl status|mode|ban|unban|allow|unallow|reload|rules|health [args]", file=sys.stderr)
+        return 2
+    command = argv[1]
+    if command == "status":
+        print(call("GET", "/status"))
+    elif command == "health":
+        print(call("GET", "/health"))
+    elif command == "rules":
+        print(call("GET", "/rules"))
+    elif command == "reload":
+        print(call("POST", "/reload", {}))
+    elif command == "mode":
+        if len(argv) < 3:
+            raise SystemExit("mode requires observe|defend|lockdown")
+        print(call("POST", "/mode", {"mode": argv[2]}))
+    elif command == "ban":
+        if len(argv) < 3:
+            raise SystemExit("ban requires an IP address")
+        if len(argv) > 3 and argv[3].isdigit():
+            seconds = int(argv[3])
+            reason = " ".join(argv[4:]) or "manual"
+        else:
+            seconds = None
+            reason = " ".join(argv[3:]) or "manual"
+        print(call("POST", "/ban", {"ip": argv[2], "seconds": seconds, "reason": reason}))
+    elif command == "unban":
+        if len(argv) < 3:
+            raise SystemExit("unban requires an IP address")
+        print(call("POST", "/unban", {"ip": argv[2]}))
+    elif command == "allow":
+        if len(argv) < 3:
+            raise SystemExit("allow requires an IP address")
+        print(call("POST", "/allow", {"ip": argv[2], "add": True}))
+    elif command == "unallow":
+        if len(argv) < 3:
+            raise SystemExit("unallow requires an IP address")
+        print(call("POST", "/allow", {"ip": argv[2], "add": False}))
+    else:
+        raise SystemExit(f"unknown command: {command}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

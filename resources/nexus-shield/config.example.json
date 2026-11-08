@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "mode": "defend",
+  "wan": "eth0",
+  "wireguardInterface": "wg0",
+  "wireguardPort": 51820,
+  "adminPort": 22,
+  "apiPort": 8791,
+  "apiToken": "",
+  "publicIp": "192.0.2.12",
+  "autoBan": true,
+  "pollSeconds": 2,
+  "allowlist": [
+    "192.0.2.14"
+  ],
+  "limits": {
+    "udpPps": 4000,
+    "tcpNewPerSec": 80,
+    "autoBanPps": 1200,
+    "blockSeconds": 3600,
+    "autoBanSamples": 3
+  },
+  "forwards": [
+    {
+      "id": "web-home",
+      "label": "Demo web (home origin)",
+      "proto": "tcp",
+      "ports": [
+        { "from": 80, "to": 80 },
+        { "from": 443, "to": 443 }
+      ],
+      "target": "192.0.2.20",
+      "enabled": true
+    },
+    {
+      "id": "demo-7777",
+      "label": "Demo Game 7777",
+      "proto": "udp",
+      "ports": [{ "from": 7777, "to": 7777 }],
+      "target": "192.0.2.20",
+      "enabled": true
+    },
+    {
+      "id": "demo-7781",
+      "label": "Demo Game 7781-7784",
+      "proto": "udp",
+      "ports": [{ "from": 7781, "to": 7784 }],
+      "target": "192.0.2.20",
+      "enabled": true
+    },
+    {
+      "id": "demo-7800",
+      "label": "Demo Game master 7800",
+      "proto": "udp",
+      "ports": [{ "from": 7800, "to": 7800 }],
+      "target": "192.0.2.20",
+      "enabled": true
+    },
+    {
+      "id": "mirror-tcp",
+      "label": "Screen mirror TCP",
+      "proto": "tcp",
+      "ports": [{ "from": 59100, "to": 59103 }],
+      "target": "192.0.2.20",
+      "enabled": true
+    },
+    {
+      "id": "mirror-udp",
+      "label": "Screen mirror UDP",
+      "proto": "udp",
+      "ports": [{ "from": 59100, "to": 59103 }],
+      "target": "192.0.2.20",
+      "enabled": true
+    },
+    {
+      "id": "turn-tcp",
+      "label": "TURN TCP 3478",
+      "proto": "tcp",
+      "ports": [{ "from": 3478, "to": 3478 }],
+      "target": "192.0.2.20",
+      "enabled": true
+    },
+    {
+      "id": "turn-udp",
+      "label": "TURN UDP 3478 + relay pool",
+      "proto": "udp",
+      "pps": 12000,
+      "ports": [
+        { "from": 3478, "to": 3478 },
+        { "from": 49152, "to": 49251 }
+      ],
+      "target": "192.0.2.20",
+      "enabled": true
+    },
+    {
+      "id": "demo-game-udp",
+      "label": "Demo game fleet",
+      "proto": "udp",
+      "pps": 24000,
+      "ports": [
+        { "from": 11778, "to": 11778 },
+        { "from": 11784, "to": 11784 },
+        { "from": 11787, "to": 11787 },
+        { "from": 11790, "to": 11790 },
+        { "from": 11796, "to": 11796 },
+        { "from": 11830, "to": 11830 },
+        { "from": 11840, "to": 11840 },
+        { "from": 11850, "to": 11850 },
+        { "from": 11860, "to": 11860 }
+      ],
+      "target": "192.0.2.20",
+      "enabled": true
+    }
+  ]
+}

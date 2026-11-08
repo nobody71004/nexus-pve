@@ -1,0 +1,23 @@
+[Unit]
+Description=Nexus Shield edge DDoS mitigator
+Documentation=https://github.com/nexus-ops/nexus-pve
+After=network-online.target wg-quick@wg0.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/nexus-shield/nexus-shieldd.py --config /etc/nexus-shield/config.json
+Restart=always
+RestartSec=3
+TimeoutStopSec=10
+User=root
+# nftables and conntrack sampling need the network namespace, nothing else.
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

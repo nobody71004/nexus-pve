@@ -1,0 +1,13 @@
+# Nexus PVE privileged helper — installed as /etc/sudoers.d/nexus-actions (mode 0440).
+#
+# The rule below grants the SSH login account. The installer substitutes that
+# account into this file, then validates it with `visudo -cf` before installing:
+# if validation fails nothing is written, so a syntax error can never lock you
+# out of sudo.
+#
+# One entry point only. nexus-priv validates every argument against a fixed
+# whitelist, so this grants a closed set of subcommands and nothing else: no
+# shell, no wildcard binary, no `bash -c`, no passwordless apt/systemctl.
+# Check what it grants with:
+#   sudo -l | grep nexus-priv
+@USER@ ALL=(root) NOPASSWD: /usr/local/sbin/nexus-priv service *, /usr/local/sbin/nexus-priv power *, /usr/local/sbin/nexus-priv backup *, /usr/local/sbin/nexus-priv guard *

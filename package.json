@@ -1,0 +1,82 @@
+{
+  "name": "nexus-pve",
+  "productName": "NexusPVE",
+  "version": "1.0.0",
+  "description": "Nexus PVE — multi-host Proxmox fleet console with backup studio and an approval-gated agent/MCP pipeline.",
+  "private": true,
+  "main": "dist-electron/main.cjs",
+  "author": "Nexus Ops",
+  "license": "GPL-3.0-only",
+  "scripts": {
+    "dev": "concurrently -k -n vite,main,app -c cyan,magenta,green \"vite\" \"npm:dev:main\" \"npm:dev:electron\"",
+    "dev:main": "node scripts/build-electron.mjs --watch",
+    "dev:electron": "wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
+    "build": "npm run build:renderer && npm run build:main",
+    "build:renderer": "vite build",
+    "build:main": "node scripts/build-electron.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "start": "npm run build && electron .",
+    "package": "npm run build && electron-builder --win",
+    "package:dir": "npm run build && electron-builder --win --dir",
+    "mcp": "node dist-electron/mcp-server.cjs",
+    "mock:pve": "node scripts/mock-pve.mjs",
+    "smoke": "node scripts/agent-smoke.mjs",
+    "preflight": "npm run typecheck && npm run build && npm run smoke",
+    "ui:mock": "vite --port 5173"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@types/ssh2": "^1.15.6",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "33.4.11",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.24.2",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7",
+    "wait-on": "^8.0.2"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "ssh2": "^1.17.0"
+  },
+  "build": {
+    "appId": "dev.nexus.pve",
+    "productName": "NexusPVE",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "resources/**/*",
+      "scripts/**/*",
+      "shared/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "npmRebuild": false,
+    "asarUnpack": [
+      "dist-electron/mcp-server.cjs"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "NexusPVE-${version}-portable.${ext}"
+    },
+    "portable": {
+      "unpackDirName": "NexusPVE"
+    }
+  }
+}

@@ -1,0 +1,1273 @@
+/* ---------------------------------------------------------- security tabs */
+
+.security-workspace {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 14px;
+}
+
+.sec-tabs {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(10, 16, 26, 0.6);
+}
+
+.sec-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: background 160ms var(--ease), color 160ms var(--ease);
+}
+
+.sec-tab:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.sec-tab.active {
+  color: var(--text);
+  background: rgba(62, 242, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(62, 242, 255, 0.18);
+}
+
+.sec-tab em {
+  font-style: normal;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px 4px;
+}
+
+/* -------------------------------------------------------------- ddos shell */
+
+.ddos {
+  gap: 14px;
+}
+
+.ddos-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ddos-copy {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+  max-width: 76ch;
+}
+
+.ddos-muted {
+  color: var(--dim);
+  font-size: 10.5px;
+}
+
+.ddos-hero {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.2fr) auto minmax(240px, 1fr);
+  gap: 18px;
+  align-items: center;
+  padding: 4px 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ddos-core {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-width: 0;
+}
+
+.ddos-core-glyph {
+  display: grid;
+  place-items: center;
+  width: 62px;
+  height: 62px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: radial-gradient(circle at 30% 20%, rgba(62, 242, 255, 0.16), transparent 65%);
+  color: var(--cyan);
+  flex-shrink: 0;
+}
+
+.ddos-core.calm .ddos-core-glyph {
+  color: var(--green);
+  background: radial-gradient(circle at 30% 20%, rgba(75, 255, 176, 0.16), transparent 65%);
+}
+
+.ddos-core.hot .ddos-core-glyph {
+  color: var(--amber);
+  background: radial-gradient(circle at 30% 20%, rgba(255, 190, 92, 0.2), transparent 65%);
+  box-shadow: 0 0 26px -6px rgba(255, 190, 92, 0.45);
+}
+
+.ddos-core.cold .ddos-core-glyph {
+  color: var(--red);
+  background: radial-gradient(circle at 30% 20%, rgba(255, 92, 122, 0.14), transparent 65%);
+}
+
+.ddos-core strong {
+  display: block;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+.ddos-core span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ddos-modes {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(8, 13, 22, 0.7);
+}
+
+.ddos-mode {
+  padding: 7px 12px;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition: all 160ms var(--ease);
+}
+
+.ddos-mode:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.ddos-mode.active {
+  color: #041016;
+  background: linear-gradient(135deg, var(--cyan), #22a8ff);
+}
+
+.ddos-mode:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ddos-spark {
+  min-width: 0;
+}
+
+.ddos-spark-head,
+.ddos-spark-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ddos-spark-head span {
+  color: var(--muted);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.ddos-spark-head strong {
+  font-size: 15px;
+}
+
+.ddos-spark-foot {
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.ddos-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 1px;
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--line);
+}
+
+.ddos-metric {
+  padding: 12px 14px;
+  background: rgba(9, 14, 23, 0.82);
+  min-width: 0;
+}
+
+.ddos-metric span {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.ddos-metric strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 19px;
+  letter-spacing: -0.02em;
+}
+
+.ddos-metric em {
+  display: block;
+  margin-top: 2px;
+  color: var(--dim);
+  font-size: 10px;
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ddos-metric.warn strong {
+  color: var(--amber);
+}
+
+.ddos-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.ddos-table-wrap {
+  margin: 2px -6px 0;
+  overflow-x: auto;
+}
+
+.ddos-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+
+.ddos-table th {
+  text-align: left;
+  padding: 6px 8px;
+  color: var(--dim);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  border-bottom: 1px solid var(--line);
+}
+
+.ddos-table td {
+  padding: 8px;
+  border-bottom: 1px solid rgba(125, 190, 220, 0.07);
+  vertical-align: middle;
+}
+
+.ddos-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.ddos-table tbody tr.hot td {
+  background: rgba(255, 190, 92, 0.045);
+}
+
+.ddos-table tbody tr.blocked td {
+  background: rgba(255, 92, 122, 0.05);
+}
+
+.ddos-table tbody tr.disabled {
+  opacity: 0.45;
+}
+
+.ddos-table td strong {
+  font-weight: 600;
+}
+
+.ddos-proto {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--dim);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ddos-row-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.ddos-table .chip {
+  margin-left: 5px;
+}
+
+.ddos-empty {
+  color: var(--dim);
+  font-size: 11.5px;
+  padding: 8px 2px;
+}
+
+.ddos-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 28px;
+  padding: 2px 0 8px;
+}
+
+.ddos-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 7px 4px 8px;
+  border: 1px solid rgba(255, 92, 122, 0.28);
+  border-radius: 7px;
+  background: rgba(255, 92, 122, 0.07);
+  color: #ffb3c1;
+  font-size: 10.5px;
+}
+
+.ddos-chip:hover {
+  border-color: rgba(255, 92, 122, 0.55);
+}
+
+.ddos-chip.allow {
+  border-color: rgba(75, 255, 176, 0.25);
+  background: rgba(75, 255, 176, 0.06);
+  color: #b6ffe0;
+}
+
+.ddos-subhead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.ddos-subhead strong {
+  font-size: 11px;
+}
+
+.ddos-subhead span {
+  color: var(--dim);
+  font-size: 10.5px;
+}
+
+.ddos-inline-form {
+  display: flex;
+  gap: 6px;
+}
+
+.ddos-inline-form input,
+.ddos-form input {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(5, 9, 16, 0.8);
+  color: var(--text);
+  font-size: 11.5px;
+  outline: none;
+}
+
+.ddos-inline-form input:focus,
+.ddos-form input:focus {
+  border-color: rgba(62, 242, 255, 0.42);
+}
+
+.ddos-inline-form input {
+  flex: 1;
+  min-width: 0;
+}
+
+.ddos-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ddos-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ddos-form label span {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.ddos-form-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.ddos-note {
+  grid-column: 1 / -1;
+  color: var(--dim);
+  font-size: 10.5px;
+  line-height: 1.55;
+  margin-top: 2px;
+}
+
+.ddos-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.ddos-switch i,
+.ddos-toggle i {
+  width: 24px;
+  height: 13px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.12);
+  position: relative;
+  transition: background 160ms var(--ease);
+}
+
+.ddos-switch i::after,
+.ddos-toggle i::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #b8c7d8;
+  transition: transform 160ms var(--ease);
+}
+
+.ddos-switch.on {
+  color: var(--green);
+  border-color: rgba(75, 255, 176, 0.3);
+}
+
+.ddos-switch.on i,
+.ddos-toggle.on i {
+  background: rgba(75, 255, 176, 0.4);
+}
+
+.ddos-switch.on i::after,
+.ddos-toggle.on i::after {
+  transform: translateX(11px);
+  background: #eafff6;
+}
+
+.ddos-toggle {
+  padding: 4px;
+}
+
+.ddos-toggle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ddos-host-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.ddos-host {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(9, 14, 23, 0.55);
+}
+
+.ddos-host.selected {
+  border-color: rgba(62, 242, 255, 0.4);
+  background: rgba(62, 242, 255, 0.05);
+}
+
+.ddos-host-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ddos-host div {
+  flex: 1;
+  min-width: 0;
+}
+
+.ddos-host strong {
+  display: block;
+  font-size: 12px;
+}
+
+.ddos-host span.mono {
+  display: block;
+  color: var(--dim);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ddos-confirm {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  margin-bottom: 10px;
+  border: 1px solid rgba(255, 190, 92, 0.28);
+  border-radius: 10px;
+  background: rgba(255, 190, 92, 0.05);
+}
+
+.ddos-confirm strong {
+  display: block;
+  font-size: 11.5px;
+}
+
+.ddos-confirm span {
+  display: block;
+  color: var(--muted);
+  font-size: 10.5px;
+  margin-top: 2px;
+  max-width: 60ch;
+}
+
+.ddos-confirm-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.ddos-events {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.ddos-event {
+  display: grid;
+  grid-template-columns: 74px 68px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px;
+  border-bottom: 1px solid rgba(125, 190, 220, 0.06);
+  font-size: 11px;
+}
+
+.ddos-event span.mono {
+  color: var(--dim);
+  font-size: 10px;
+}
+
+@media (max-width: 1280px) {
+  .ddos-hero {
+    grid-template-columns: 1fr 1fr;
+  }
+  .ddos-spark {
+    grid-column: 1 / -1;
+  }
+  .ddos-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .ddos-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ddos-hero {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ------------------------------------------------- ddos instrumentation */
+
+.ddos-telemetry {
+  position: relative;
+  margin-top: 14px;
+  padding: 14px 14px 10px;
+  border: 1px solid rgba(125, 190, 220, 0.14);
+  border-radius: 14px;
+  background:
+    radial-gradient(900px 240px at 15% -20%, rgba(62, 242, 255, 0.07), transparent 65%),
+    radial-gradient(700px 260px at 100% 0%, rgba(139, 108, 255, 0.06), transparent 70%),
+    linear-gradient(180deg, rgba(8, 14, 24, 0.86), rgba(5, 9, 16, 0.72));
+  overflow: hidden;
+}
+
+.ddos-telemetry::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(110, 200, 230, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(110, 200, 230, 0.04) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(80% 120% at 30% 0%, #000 20%, transparent 90%);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.ddos-telemetry::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(62, 242, 255, 0.28), rgba(139, 108, 255, 0.22), transparent);
+  pointer-events: none;
+}
+
+.ddos-telemetry > * {
+  position: relative;
+  z-index: 1;
+}
+
+.ddos-telemetry-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+
+.ddos-telemetry-title {
+  min-width: 0;
+}
+
+.ddos-telemetry-title .eyebrow {
+  margin-bottom: 2px;
+}
+
+.ddos-telemetry-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ddos-telemetry-name strong {
+  font-size: 13px;
+  letter-spacing: -0.015em;
+}
+
+.ddos-telemetry-sub {
+  display: block;
+  margin-top: 2px;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 8.5px;
+  letter-spacing: 0.02em;
+}
+
+.ddos-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px;
+  border: 1px solid rgba(75, 255, 176, 0.22);
+  border-radius: 5px;
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 7.5px;
+  letter-spacing: 0.1em;
+}
+
+.ddos-live-badge i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+  animation: ddos-live-pulse 2.4s ease-in-out infinite;
+}
+
+.ddos-live-badge.offline {
+  border-color: rgba(255, 92, 122, 0.25);
+  color: var(--red);
+}
+
+.ddos-live-badge.offline i {
+  background: var(--red);
+  box-shadow: none;
+  animation: none;
+}
+
+.ddos-telemetry-chip {
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 7.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.ddos-telemetry-chip.hot {
+  border-color: rgba(255, 190, 92, 0.3);
+  color: var(--amber);
+  background: rgba(255, 190, 92, 0.05);
+}
+
+.ddos-telemetry-key {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 7.5px;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.ddos-telemetry-key span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ddos-zone-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.ddos-zone-dot.nominal {
+  background: var(--green);
+  box-shadow: 0 0 7px rgba(75, 255, 176, 0.6);
+}
+
+.ddos-zone-dot.elevated {
+  background: var(--amber);
+  box-shadow: 0 0 7px rgba(255, 190, 92, 0.55);
+}
+
+.ddos-zone-dot.critical {
+  background: var(--red);
+  box-shadow: 0 0 7px rgba(255, 92, 122, 0.55);
+}
+
+.ddos-dials {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 9px;
+  align-items: stretch;
+}
+
+.ddos-dial-card {
+  --dial-from: #3ef2ff;
+  --dial-to: #1f7fff;
+  --dial-glow: rgba(62, 242, 255, 0.42);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 9px 10px 8px;
+  border: 1px solid rgba(125, 190, 220, 0.12);
+  border-radius: 11px;
+  background: linear-gradient(180deg, rgba(15, 24, 38, 0.72), rgba(6, 11, 19, 0.62));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+
+.ddos-dial-card::after {
+  content: "";
+  position: absolute;
+  left: 9px;
+  right: 9px;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--dial-glow), transparent);
+  opacity: 0.45;
+}
+
+.ddos-dial-card.primary {
+  grid-column: span 2;
+  border-color: rgba(255, 255, 255, 0.14);
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.04), transparent 55%),
+    linear-gradient(180deg, rgba(18, 29, 45, 0.82), rgba(6, 11, 19, 0.78));
+}
+
+.ddos-dial-card.primary::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 48%, var(--dial-glow), transparent 42%);
+  opacity: 0.05;
+  pointer-events: none;
+}
+
+.ddos-dial-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.ddos-dial-name {
+  display: block;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+}
+
+.ddos-dial-card.primary .ddos-dial-name {
+  color: var(--text);
+  font-size: 10px;
+}
+
+.ddos-dial-range {
+  display: block;
+  margin-top: 2px;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.ddos-dial-state {
+  color: var(--dial-from);
+  font-family: var(--mono);
+  font-size: 7.5px;
+  letter-spacing: 0.08em;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.ddos-dial-face {
+  position: relative;
+  flex: 0 1 auto;
+  width: 100%;
+  max-width: 220px;
+  aspect-ratio: 1;
+  margin: 1px auto 0;
+}
+
+.ddos-dial-card.primary .ddos-dial-face {
+  max-width: 230px;
+}
+
+.ddos-dial-face svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.ddos-dial-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 48%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 42%, rgba(5, 11, 19, 0.94), rgba(5, 11, 19, 0.68) 62%, rgba(5, 11, 19, 0.08) 78%);
+  box-shadow: inset 0 0 0 1px rgba(125, 190, 220, 0.06);
+  text-align: center;
+  pointer-events: none;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.85);
+}
+
+.ddos-dial-center strong {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: clamp(17px, 1.8vw, 24px);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.06em;
+}
+
+.ddos-dial-card.primary .ddos-dial-center strong {
+  font-size: clamp(28px, 2.8vw, 40px);
+}
+
+.ddos-dial-center em {
+  margin-top: 3px;
+  color: var(--dial-from);
+  font-family: var(--mono);
+  font-size: 8px;
+  font-style: normal;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.ddos-dial-caption {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 3px 6px;
+  padding: 3px 2px 0;
+  text-align: center;
+}
+
+.ddos-dial-caption span {
+  color: var(--dial-from);
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.ddos-dial-caption em {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 8px;
+  font-style: normal;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ddos-dial-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 7px;
+  width: 100%;
+  margin-top: auto;
+  padding-top: 7px;
+  border-top: 1px solid rgba(125, 190, 220, 0.1);
+}
+
+.ddos-dial-meta span {
+  display: block;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 7px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.ddos-dial-meta strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ddos-dial-card.primary .ddos-dial-meta span {
+  font-size: 7.5px;
+}
+
+.ddos-dial-card.primary .ddos-dial-meta strong {
+  font-size: 10px;
+}
+
+.ddos-dial-card.primary .ddos-dial-meta {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/* --------------------------------------------------- dial svg internals */
+
+.ddos-dial-bezel {
+  fill: none;
+  stroke: rgba(125, 190, 220, 0.15);
+  stroke-width: 1;
+}
+
+.ddos-dial-bloom {
+  opacity: 0.8;
+}
+
+.ddos-dial-ring {
+  fill: none;
+  stroke: rgba(125, 190, 220, 0.055);
+  stroke-width: 1;
+}
+
+.ddos-dial-ring.faint {
+  stroke-dasharray: 2 5;
+}
+
+.ddos-dial-reticle {
+  fill: none;
+  stroke: rgba(125, 190, 220, 0.1);
+  stroke-width: 0.7;
+  stroke-dasharray: 1 4;
+}
+
+.ddos-dial-zone-track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.04);
+  stroke-width: 2;
+}
+
+.ddos-dial-zone {
+  fill: none;
+  stroke-width: 1.4;
+  opacity: 0.42;
+}
+
+.ddos-dial-track {
+  fill: none;
+  stroke: rgba(170, 210, 235, 0.12);
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+
+.ddos-dial-arc {
+  fill: none;
+  stroke-width: 6;
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  transition: stroke-dashoffset 850ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.ddos-dial-secondary-track {
+  fill: none;
+  stroke: rgba(170, 210, 235, 0.06);
+  stroke-width: 2.2;
+}
+
+.ddos-dial-secondary-arc {
+  fill: none;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  opacity: 0.9;
+  transition: stroke-dashoffset 850ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.ddos-dial-needle {
+  transform-origin: 120px 120px;
+  transition: transform 850ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.ddos-dial-hub {
+  fill: #07111d;
+  stroke: rgba(125, 190, 220, 0.28);
+  stroke-width: 1;
+}
+
+.ddos-dial-label {
+  fill: #6f8297;
+  font-family: var(--mono);
+  font-size: 7.5px;
+  letter-spacing: 0.02em;
+}
+
+.ddos-dial-card.primary .ddos-dial-label {
+  fill: #8ba2b8;
+  font-size: 8.2px;
+}
+
+/* ------------------------------------------- telemetry facts and legend */
+
+.ddos-telemetry-facts {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 11px;
+  overflow: hidden;
+  border: 1px solid rgba(125, 190, 220, 0.12);
+  border-radius: 9px;
+  background: rgba(125, 190, 220, 0.08);
+}
+
+.ddos-fact {
+  min-width: 0;
+  padding: 7px 8px;
+  background: rgba(9, 14, 23, 0.72);
+}
+
+.ddos-fact span {
+  display: block;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 7px;
+  letter-spacing: 0.09em;
+  white-space: nowrap;
+}
+
+.ddos-fact strong {
+  display: block;
+  margin-top: 2px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ddos-fact em {
+  display: block;
+  overflow: hidden;
+  margin-top: 1px;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 7.5px;
+  font-style: normal;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ddos-telemetry-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 7.5px;
+}
+
+.ddos-telemetry-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ddos-telemetry-legend span.mono {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.ddos-telemetry.is-offline .ddos-dial-card {
+  opacity: 0.6;
+}
+
+.ddos-telemetry.is-offline .ddos-telemetry-legend span.mono {
+  color: var(--red);
+}
+
+@keyframes ddos-live-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+@media (max-width: 1280px) {
+  .ddos-dials {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .ddos-dial-card.primary {
+    grid-column: span 2;
+    grid-row: auto;
+  }
+
+  .ddos-dial-card.primary .ddos-dial-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ddos-telemetry-key {
+    display: none;
+  }
+
+  .ddos-telemetry-facts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .ddos-telemetry-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ddos-dials {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ddos-dial-card.primary {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+
+  .ddos-telemetry-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .ddos-dials {
+    grid-template-columns: 1fr;
+  }
+
+  .ddos-dial-card.primary {
+    grid-column: auto;
+  }
+
+  .ddos-dial-card.primary .ddos-dial-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ddos-telemetry-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .ddos-telemetry-legend span.mono {
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ddos-dial-arc,
+  .ddos-dial-secondary-arc,
+  .ddos-dial-needle,
+  .ddos-live-badge i {
+    transition: none;
+    animation: none;
+  }
+}

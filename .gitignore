@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-electron/
+release/
+.asar-inspect/
+artifacts/
+*.exe
+*.log
+.env
+.env.*
+.DS_Store
+Thumbs.db

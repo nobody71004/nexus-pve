@@ -1,0 +1,670 @@
+/* ==========================================================================
+   NEXUS PVE — security guard surfaces
+   ========================================================================== */
+
+.guard {
+  gap: 16px;
+}
+
+.guard-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.guard-chain {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--green);
+}
+
+.guard-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.guard-strip-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(9, 14, 24, 0.55);
+}
+
+.guard-strip-item strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 560;
+}
+
+.guard-strip-item em {
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--dim);
+}
+
+.guard-live {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dim);
+}
+
+.guard-live.on {
+  background: var(--green);
+  animation: guardPulse 2.4s infinite;
+}
+
+.guard-live.off {
+  background: var(--amber);
+}
+
+@keyframes guardPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(75, 255, 176, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(75, 255, 176, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(75, 255, 176, 0);
+  }
+}
+
+.guard-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.guard-modes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.guard-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 11px 13px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: rgba(9, 14, 24, 0.5);
+  color: var(--muted);
+  transition: border-color 0.2s var(--ease), background 0.2s var(--ease);
+}
+
+.guard-mode strong {
+  font-size: 12px;
+  color: var(--text);
+}
+
+.guard-mode span {
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--dim);
+}
+
+.guard-mode:hover:not(:disabled) {
+  border-color: rgba(140, 210, 255, 0.3);
+}
+
+.guard-mode.active {
+  border-color: rgba(62, 242, 255, 0.45);
+  background: linear-gradient(180deg, rgba(62, 242, 255, 0.14), rgba(62, 242, 255, 0.03));
+}
+
+.guard-mode.active.lockdown {
+  border-color: rgba(255, 92, 122, 0.45);
+  background: linear-gradient(180deg, rgba(255, 92, 122, 0.14), rgba(255, 92, 122, 0.03));
+}
+
+.guard-mode.active.defend {
+  border-color: rgba(75, 255, 176, 0.4);
+  background: linear-gradient(180deg, rgba(75, 255, 176, 0.12), rgba(75, 255, 176, 0.03));
+}
+
+.guard-switches {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.guard-switch {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(9, 14, 24, 0.5);
+  text-align: left;
+}
+
+.guard-switch i {
+  flex: none;
+  width: 30px;
+  height: 17px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  position: relative;
+  transition: background 0.2s var(--ease);
+}
+
+.guard-switch i::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--dim);
+  transition: transform 0.2s var(--ease), background 0.2s var(--ease);
+}
+
+.guard-switch.on i {
+  background: rgba(75, 255, 176, 0.2);
+  border-color: rgba(75, 255, 176, 0.4);
+}
+
+.guard-switch.on i::after {
+  transform: translateX(13px);
+  background: var(--green);
+}
+
+.guard-switch div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.guard-switch strong {
+  font-size: 11.5px;
+  font-weight: 550;
+}
+
+.guard-switch span {
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.guard-hosts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 9px;
+}
+
+.guard-host {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(9, 14, 24, 0.55);
+  text-align: left;
+}
+
+.guard-host.active {
+  border-color: rgba(62, 242, 255, 0.4);
+  box-shadow: 0 12px 32px -24px rgba(62, 242, 255, 0.9);
+}
+
+.guard-host > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.guard-host strong {
+  font-size: 12.5px;
+  font-weight: 560;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.guard-host .mono {
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.guard-grade {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 600;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.guard-grade.grade-A {
+  color: var(--green);
+  border-color: rgba(75, 255, 176, 0.4);
+  background: rgba(75, 255, 176, 0.08);
+}
+
+.guard-grade.grade-B {
+  color: var(--cyan);
+  border-color: rgba(62, 242, 255, 0.35);
+  background: rgba(62, 242, 255, 0.06);
+}
+
+.guard-grade.grade-C {
+  color: var(--amber);
+  border-color: rgba(255, 190, 92, 0.35);
+  background: rgba(255, 190, 92, 0.06);
+}
+
+.guard-grade.grade-D,
+.guard-grade.grade-F {
+  color: var(--red);
+  border-color: rgba(255, 92, 122, 0.4);
+  background: rgba(255, 92, 122, 0.08);
+}
+
+.guard-verdict {
+  flex: none;
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.guard-verdict.bad {
+  color: var(--amber);
+}
+
+.guard-verdict.good {
+  color: var(--green);
+}
+
+.guard-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.guard-layers {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.guard-layer {
+  display: grid;
+  grid-template-columns: 1.05fr 1.4fr auto auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 11.5px;
+}
+
+.guard-layer > span {
+  color: var(--muted);
+}
+
+.guard-layer-bar {
+  position: relative;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.guard-layer-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: var(--cyan);
+}
+
+.guard-layer-bar i.ok {
+  background: linear-gradient(90deg, rgba(75, 255, 176, 0.5), var(--green));
+}
+
+.guard-layer-bar i.warn {
+  background: linear-gradient(90deg, rgba(255, 190, 92, 0.5), var(--amber));
+}
+
+.guard-layer-bar i.err {
+  background: linear-gradient(90deg, rgba(255, 92, 122, 0.5), var(--red));
+}
+
+.guard-layer strong {
+  font-size: 10.5px;
+  color: var(--text);
+  min-width: 34px;
+  text-align: right;
+}
+
+.guard-layer em {
+  font-style: normal;
+  font-size: 9.5px;
+  color: var(--dim);
+  min-width: 58px;
+  text-align: right;
+}
+
+.guard-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 10.5px;
+  color: var(--dim);
+}
+
+.guard-summary strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.guard-drift,
+.guard-bans {
+  margin-top: 12px;
+  padding: 11px 12px;
+  border: 1px solid rgba(255, 190, 92, 0.28);
+  border-radius: 12px;
+  background: rgba(255, 190, 92, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.guard-drift-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.guard-drift-head strong,
+.guard-bans strong {
+  font-size: 11.5px;
+}
+
+.guard-drift-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.guard-drift-row em {
+  font-style: normal;
+  color: var(--dim);
+}
+
+.guard-bans {
+  border-color: rgba(255, 92, 122, 0.28);
+  background: rgba(255, 92, 122, 0.05);
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.guard-findings {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  max-height: 520px;
+  overflow-y: auto;
+}
+
+.guard-finding {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(9, 14, 24, 0.5);
+}
+
+.guard-finding.status-fail {
+  border-color: rgba(255, 92, 122, 0.26);
+}
+
+.guard-finding.status-warn {
+  border-color: rgba(255, 190, 92, 0.22);
+}
+
+.guard-finding.status-pass {
+  opacity: 0.72;
+}
+
+.guard-finding-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.guard-finding-head strong {
+  font-size: 11.5px;
+  font-weight: 560;
+  flex: 1;
+  min-width: 120px;
+}
+
+.guard-layer-tag {
+  font-size: 9px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.guard-finding p {
+  margin: 6px 0 0;
+  font-size: 10.5px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.guard-finding code {
+  display: block;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--dim);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.guard-confirm {
+  margin-top: 10px;
+  padding: 10px 11px;
+  border: 1px solid rgba(255, 92, 122, 0.4);
+  border-radius: 10px;
+  background: rgba(255, 92, 122, 0.07);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.guard-confirm strong {
+  font-size: 11px;
+}
+
+.guard-confirm span {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.guard-confirm div {
+  display: flex;
+  gap: 7px;
+  margin-top: 4px;
+}
+
+.guard-journal-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.guard-journal-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.guard-journal-route-filter {
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: #090e18;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  text-transform: uppercase;
+}
+
+.guard-journal-count {
+  color: var(--dim);
+  font-size: 9px;
+}
+
+.guard-journal {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.guard-journal-head,
+.guard-journal-row {
+  display: grid;
+  grid-template-columns: 74px 74px 72px 66px 130px minmax(0, 1fr) 56px;
+  align-items: center;
+  gap: 10px;
+}
+
+.guard-journal-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 5px 4px 7px;
+  border-bottom: 1px solid var(--line);
+  background: #080d16f2;
+  font-family: var(--mono);
+  font-size: 8.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.guard-journal-head span:last-child {
+  text-align: right;
+}
+
+.guard-journal-row {
+  padding: 6px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+  font-size: 10.5px;
+}
+
+.guard-journal-row > .mono {
+  color: var(--dim);
+  font-size: 9.5px;
+}
+
+.guard-journal-trigger,
+.guard-journal-route {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.guard-journal-trigger {
+  color: var(--muted);
+}
+
+.guard-journal-trigger.trigger-automatic {
+  color: var(--violet);
+}
+
+.guard-journal-trigger.empty,
+.guard-journal-route.empty {
+  color: var(--dim);
+}
+
+.guard-journal-route.route-root {
+  color: var(--green);
+}
+
+.guard-journal-route.route-password {
+  color: var(--cyan);
+}
+
+.guard-journal-route.route-nopasswd {
+  color: var(--violet);
+}
+
+.guard-journal-route.route-none {
+  color: var(--red);
+}
+
+.guard-journal-host {
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.guard-journal-message {
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.guard-journal-hash {
+  text-align: right;
+  color: rgba(62, 242, 255, 0.5);
+  font-size: 9px;
+}
+
+.guard-empty {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+@media (max-width: 1180px) {
+  .guard-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .guard-controls,
+  .guard-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
