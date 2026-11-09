@@ -14,7 +14,7 @@ function resolveEdgeHost(ctx: ToolContext, args: Record<string, unknown>): strin
     if (!match) throw new Error(`No Linux host matches "${requested}". Configured: ${hosts.map((host) => host.label).join(", ")}`);
     return match.id;
   }
-  const preferred = hosts.find((host) => /demo|relay|shield/i.test(host.label) || host.host === "192.0.2.12");
+  const preferred = hosts.find((host) => /edge|relay|shield/i.test(host.label));
   if (preferred) return preferred.id;
   if (hosts.length === 1) return hosts[0].id;
   throw new Error(`Several Linux hosts are configured; pass "host". Options: ${hosts.map((host) => host.label).join(", ")}`);

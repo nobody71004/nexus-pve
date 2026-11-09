@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Nexus Shield — edge DDoS mitigator for the demo relay.
+"""Nexus Shield — edge DDoS mitigator for a relay edge.
 
-The box this runs on is the public ingress for the home demo/Demo Game stack.
+The box this runs on is the public ingress for a demo game stack.
 It keeps the existing WireGuard DNAT path intact, but puts a stateful filter in
 front of it: malformed traffic is dropped before it reaches conntrack, every
 forwarded port gets a packet/connection ceiling, and a sampled top-talker list

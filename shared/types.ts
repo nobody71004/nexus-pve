@@ -1,6 +1,49 @@
 // Shared contract for every Nexus PVE process: Electron main, preload, renderer and the MCP server.
 
 import type { DdosConfig, DdosIncident, DdosInstallResult, DdosMode, DdosOverview, DdosStatus } from "./ddos-types";
+import type {
+  RelayChain,
+  RelayChainInput,
+  RelayDeployResult,
+  RelayOverview,
+  RelayRemoveResult,
+  VncSession,
+} from "./fabric-types";
+import type {
+  TeamAuthState,
+  TeamBootstrapInput,
+  TeamLoginInput,
+  TeamOverview,
+  TeamUser,
+  TeamUserInput,
+  TeamUserPatch,
+} from "./team-types";
+import type {
+  TeamAuditExportResult,
+  TeamAuditFilter,
+  TeamAuditResult,
+  TeamSyncConfigInput,
+  TeamSyncRunResult,
+  TeamSyncStatus,
+} from "./team-sync";
+
+export type {
+  RelayChain,
+  RelayChainInput,
+  RelayDeployOutput,
+  RelayDeployResult,
+  RelayHealth,
+  RelayHost,
+  RelayNodeConfig,
+  RelayNodeStatus,
+  RelayOverview,
+  RelayPlan,
+  RelayPlanHop,
+  RelayRemoveResult,
+  RelayRole,
+  RelayTransport,
+  VncSession,
+} from "./fabric-types";
 
 export type {
   DdosConfig,
@@ -17,6 +60,37 @@ export type {
   DdosSource,
   DdosStatus,
 } from "./ddos-types";
+
+export type {
+  TeamActivityEntry,
+  TeamAuthState,
+  TeamBootstrapInput,
+  TeamLoginInput,
+  TeamMachine,
+  TeamOverview,
+  TeamPermissions,
+  TeamRole,
+  TeamStatus,
+  TeamUser,
+  TeamUserInput,
+  TeamUserPatch,
+} from "./team-types";
+
+export type {
+  TeamAuditExportResult,
+  TeamAuditFilter,
+  TeamAuditResult,
+  TeamAuditTarget,
+  TeamSyncConfigInput,
+  TeamSyncMachine,
+  TeamSyncPhase,
+  TeamSyncRemoteState,
+  TeamSyncRunResult,
+  TeamSyncSnapshot,
+  TeamSyncStatus,
+  TeamSyncUser,
+  TeamSyncUserTombstone,
+} from "./team-sync";
 
 export type VmType = "qemu" | "lxc";
 export type HostHealth = "online" | "degraded" | "offline" | "connecting";
@@ -647,7 +721,7 @@ export interface AppInfo {
 }
 
 export interface NexusEvent {
-  type: "snapshot" | "pipeline" | "task-log" | "toast" | "host-status" | "security";
+  type: "snapshot" | "pipeline" | "task-log" | "toast" | "host-status" | "security" | "team-sync";
   hostId?: string;
   run?: PipelineRun;
   node?: string;
@@ -659,6 +733,7 @@ export interface NexusEvent {
   scan?: SecurityScan;
   policy?: SecurityPolicy;
   journal?: SecurityJournalEntry;
+  teamSync?: TeamSyncStatus;
 }
 
 export interface NexusBridge {
@@ -666,6 +741,29 @@ export interface NexusBridge {
     info(): Promise<AppInfo>;
     window(action: "minimize" | "maximize" | "close"): Promise<void>;
     openExternal(url: string): Promise<void>;
+  };
+  auth: {
+    status(): Promise<TeamAuthState>;
+    bootstrap(input: TeamBootstrapInput): Promise<TeamUser>;
+    login(input: TeamLoginInput): Promise<TeamUser>;
+    logout(): Promise<void>;
+    refreshSession(): Promise<TeamAuthState>;
+    changePassword(currentPassword: string, nextPassword: string): Promise<void>;
+  };
+  team: {
+    overview(): Promise<TeamOverview>;
+    createUser(input: TeamUserInput): Promise<TeamOverview>;
+    updateUser(id: string, patch: TeamUserPatch): Promise<TeamOverview>;
+    deleteUser(id: string): Promise<TeamOverview>;
+    setMachineLinks(machineId: string, userIds: string[]): Promise<TeamOverview>;
+    audit(filter?: TeamAuditFilter): Promise<TeamAuditResult>;
+    exportAudit(filter?: TeamAuditFilter): Promise<TeamAuditExportResult>;
+  };
+  teamSync: {
+    status(): Promise<TeamSyncStatus>;
+    configure(input: TeamSyncConfigInput): Promise<TeamSyncRunResult>;
+    now(): Promise<TeamSyncRunResult>;
+    disable(): Promise<TeamSyncStatus>;
   };
   hosts: {
     list(): Promise<HostSummary[]>;
@@ -744,6 +842,17 @@ export interface NexusBridge {
     allow(hostId: string, ip: string, add: boolean): Promise<DdosStatus>;
     apply(hostId: string, patch: Partial<DdosConfig>): Promise<DdosStatus>;
     journal(limit?: number): Promise<DdosIncident[]>;
+  };
+  relay: {
+    overview(): Promise<RelayOverview>;
+    save(input: RelayChainInput): Promise<RelayChain>;
+    probe(): Promise<RelayOverview>;
+    deploy(): Promise<RelayDeployResult>;
+    remove(): Promise<RelayRemoveResult>;
+  };
+  vnc: {
+    open(hostId: string, port?: number): Promise<VncSession>;
+    close(sessionId: string): Promise<void>;
   };
   mcp: {
     status(): Promise<McpStatus>;

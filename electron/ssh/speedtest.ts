@@ -258,7 +258,8 @@ export async function runSpeedTest(store: ConfigStore, id: string): Promise<Spee
   }
 }
 
-export async function runSpeedTestAll(store: ConfigStore): Promise<SpeedTestResult[]> {
-  const hosts = store.sshHosts();
+export async function runSpeedTestAll(store: ConfigStore, hostIds?: string[]): Promise<SpeedTestResult[]> {
+  const allowed = hostIds ? new Set(hostIds) : null;
+  const hosts = store.sshHosts().filter((host) => !allowed || allowed.has(host.id));
   return Promise.all(hosts.map((host) => runSpeedTest(store, host.id)));
 }

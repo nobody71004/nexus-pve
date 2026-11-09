@@ -204,7 +204,7 @@ export class DdosService {
       .map((id) => this.store.sshHost(id))
       .filter((host): host is NonNullable<typeof host> => Boolean(host));
     const preferred = hosts.find(
-      (host) => /demo|relay|shield/i.test(host.label) || host.host === "192.0.2.12",
+      (host) => /edge|relay|shield/i.test(host.label),
     );
     return preferred?.id;
   }

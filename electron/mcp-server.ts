@@ -67,7 +67,7 @@ not read. audit.tail shows every mutation already applied by this agent.
 Linux hosts: ssh.hosts, ssh.status, ssh.speedtest, ssh.helper are safe reads. ssh.helper.install
 installs the root helper and sudoers drop-in (gated). ssh.power, ssh.service, ssh.backup and
 ssh.exec are gated too.
-DDoS shield: ddos.overview, ddos.status, ddos.rules and ddos.journal are read-only. ddos.mode changes the edge posture; ddos.config pushes rate limits, forwards or the allowlist; ddos.unban and ddos.allow edit containment. ddos.install re-images the edge daemon and ddos.ban adds a source to the drop set; both require "confirm": true. The shield runs on the edge itself, so protection continues with this app closed. The edge host is the SSH host labelled demo-relay by default.
+DDoS shield: ddos.overview, ddos.status, ddos.rules and ddos.journal are read-only. ddos.mode changes the edge posture; ddos.config pushes rate limits, forwards or the allowlist; ddos.unban and ddos.allow edit containment. ddos.install re-images the edge daemon and ddos.ban adds a source to the drop set; both require "confirm": true. The shield runs on the edge itself, so protection continues with this app closed. The edge host is auto-selected from SSH hosts labelled edge, relay, or shield.
 security.enforce (fixed remediation ids), security.resident and security.policy change a
 host; security.contain bans an address. security.enforce and security.contain require
 "confirm": true. The guard refuses to ban loopback, link-local or any address holding a

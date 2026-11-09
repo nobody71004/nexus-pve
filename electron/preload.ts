@@ -11,8 +11,14 @@ import type {
   ScheduleInput,
   SshAction,
   SshHostInput,
+  TeamBootstrapInput,
+  TeamLoginInput,
+  TeamUserInput,
+  TeamUserPatch,
   VmAction,
   VmType,
+  TeamAuditFilter,
+  TeamSyncConfigInput,
 } from "../shared/types";
 
 const bridge: NexusBridge = {
@@ -20,6 +26,31 @@ const bridge: NexusBridge = {
     info: () => ipcRenderer.invoke(IPC.appInfo),
     window: (action) => ipcRenderer.invoke(IPC.appWindow, action),
     openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
+  },
+  auth: {
+    status: () => ipcRenderer.invoke(IPC.authStatus),
+    bootstrap: (input: TeamBootstrapInput) => ipcRenderer.invoke(IPC.authBootstrap, input),
+    login: (input: TeamLoginInput) => ipcRenderer.invoke(IPC.authLogin, input),
+    logout: () => ipcRenderer.invoke(IPC.authLogout),
+    refreshSession: () => ipcRenderer.invoke(IPC.authRefreshSession),
+    changePassword: (currentPassword: string, nextPassword: string) =>
+      ipcRenderer.invoke(IPC.authChangePassword, currentPassword, nextPassword),
+  },
+  team: {
+    overview: () => ipcRenderer.invoke(IPC.teamOverview),
+    createUser: (input: TeamUserInput) => ipcRenderer.invoke(IPC.teamCreateUser, input),
+    updateUser: (id: string, patch: TeamUserPatch) => ipcRenderer.invoke(IPC.teamUpdateUser, id, patch),
+    deleteUser: (id: string) => ipcRenderer.invoke(IPC.teamDeleteUser, id),
+    setMachineLinks: (machineId: string, userIds: string[]) =>
+      ipcRenderer.invoke(IPC.teamSetMachineLinks, machineId, userIds),
+    audit: (filter?: TeamAuditFilter) => ipcRenderer.invoke(IPC.teamAudit, filter),
+    exportAudit: (filter?: TeamAuditFilter) => ipcRenderer.invoke(IPC.teamAuditExport, filter),
+  },
+  teamSync: {
+    status: () => ipcRenderer.invoke(IPC.teamSyncStatus),
+    configure: (input: TeamSyncConfigInput) => ipcRenderer.invoke(IPC.teamSyncConfigure, input),
+    now: () => ipcRenderer.invoke(IPC.teamSyncNow),
+    disable: () => ipcRenderer.invoke(IPC.teamSyncDisable),
   },
   hosts: {
     list: () => ipcRenderer.invoke(IPC.hostsList),
@@ -113,6 +144,17 @@ const bridge: NexusBridge = {
     allow: (hostId: string, ip: string, add: boolean) => ipcRenderer.invoke(IPC.ddosAllow, hostId, ip, add),
     apply: (hostId: string, patch: Partial<DdosConfig>) => ipcRenderer.invoke(IPC.ddosApply, hostId, patch),
     journal: (limit?: number) => ipcRenderer.invoke(IPC.ddosJournal, limit),
+  },
+  relay: {
+    overview: () => ipcRenderer.invoke(IPC.relayOverview),
+    save: (input) => ipcRenderer.invoke(IPC.relaySave, input),
+    probe: () => ipcRenderer.invoke(IPC.relayProbe),
+    deploy: () => ipcRenderer.invoke(IPC.relayDeploy),
+    remove: () => ipcRenderer.invoke(IPC.relayRemove),
+  },
+  vnc: {
+    open: (hostId: string, port?: number) => ipcRenderer.invoke(IPC.vncOpen, hostId, port),
+    close: (sessionId: string) => ipcRenderer.invoke(IPC.vncClose, sessionId),
   },
   mcp: {
     status: () => ipcRenderer.invoke(IPC.mcpStatus),

@@ -17,6 +17,7 @@ import { speedHistory, useSpeedHistory } from "../lib/speed";
 import { linkLabel, shortRate } from "./Throughput";
 import { Icon } from "./Icon";
 import { SshTerminal } from "./SshTerminal";
+import { VncConsole } from "./VncConsole";
 import { Chip, Gauge, Modal, Panel, Skeleton, Sparkline, StatusDot, type Tone } from "./ui";
 
 const EMPTY: SshHostInput = {
@@ -131,9 +132,11 @@ function LineChart({ series, height = 120, max }: { series: Series[]; height?: n
 export function LinuxHosts({
   onToast,
   onOpenNetwork,
+  canManage = true,
 }: {
   onToast: (level: "info" | "warn" | "error" | "ok", title: string, detail?: string) => void;
   onOpenNetwork?: () => void;
+  canManage?: boolean;
 }) {
   const [hosts, setHosts] = useState<SshHostSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -168,6 +171,7 @@ export function LinuxHosts({
   const [journal, setJournal] = useState<SecurityJournalEntry[]>([]);
   const [journalReady, setJournalReady] = useState(false);
   const [expandedHistory, setExpandedHistory] = useState<Record<string, boolean>>({});
+  const [consoleTab, setConsoleTab] = useState<"cli" | "vnc">("cli");
   const cancelled = useRef(false);
 
   const loadHosts = useCallback(async () => {
@@ -547,9 +551,11 @@ export function LinuxHosts({
               <button className="btn small ghost" onClick={() => void runSpeed()} disabled={speeding || hosts.length === 0}>
                 <Icon name="activity" size={13} className={speeding ? "spin" : ""} /> {speeding ? "Measuring…" : "Speed test all"}
               </button>
-              <button className="btn small primary" onClick={startNew}>
-                <Icon name="plus" size={13} /> Add host
-              </button>
+              {canManage ? (
+                <button className="btn small primary" onClick={startNew}>
+                  <Icon name="plus" size={13} /> Add host
+                </button>
+              ) : null}
             </div>
           }
         >
@@ -731,9 +737,11 @@ export function LinuxHosts({
                     <button className="btn small ghost" onClick={() => setActiveId(host.id)}>
                       {activeId === host.id ? "Live view" : "Open"}
                     </button>
-                    <button className="btn small ghost" onClick={() => startEdit(host)}>
-                      Edit
-                    </button>
+                    {canManage ? (
+                      <button className="btn small ghost" onClick={() => startEdit(host)}>
+                        Edit
+                      </button>
+                    ) : null}
                     <button
                       className="btn icon ghost"
                       onClick={() => void runSpeed(host.id)}
@@ -745,9 +753,11 @@ export function LinuxHosts({
                     <button className="btn icon ghost" onClick={() => copySsh(host)} title="Copy ssh command">
                       <Icon name="copy" size={12} />
                     </button>
-                    <button className="btn icon ghost danger" onClick={() => void remove(host)} title="Remove host">
-                      <Icon name="trash" size={12} />
-                    </button>
+                    {canManage ? (
+                      <button className="btn icon ghost danger" onClick={() => void remove(host)} title="Remove host">
+                        <Icon name="trash" size={12} />
+                      </button>
+                    ) : null}
                   </footer>
                 </article>
               );
@@ -756,8 +766,12 @@ export function LinuxHosts({
               <div className="empty-inline">
                 <Icon name="terminal" size={20} />
                 <div>
-                  <strong>No Linux hosts yet</strong>
-                  <p>Add a VPS or bare-metal box. Key or password auth both work; the credential is encrypted on this machine.</p>
+                  <strong>{canManage ? "No Linux hosts yet" : "No machines linked to you"}</strong>
+                  <p>
+                    {canManage
+                      ? "Add a VPS or bare-metal box. Key or password auth both work; the credential is encrypted on this machine."
+                      : "Ask an admin to link an SSH machine to your team account; only linked machines appear here."}
+                  </p>
                 </div>
               </div>
             ) : null}
@@ -962,7 +976,34 @@ export function LinuxHosts({
               )}
             </Panel>
 
-            {activeHost ? <Panel eyebrow="CONSOLE" title="CLI terminal" flush><SshTerminal host={activeHost} onToast={onToast} /></Panel> : null}
+            {activeHost ? (
+              <Panel eyebrow="CONSOLE" title="Host console" flush>
+                <div className="console-tabs" role="tablist" aria-label="Console type">
+                  <button
+                    role="tab"
+                    aria-selected={consoleTab === "cli"}
+                    className={cx("console-tab", consoleTab === "cli" && "active")}
+                    onClick={() => setConsoleTab("cli")}
+                  >
+                    <Icon name="terminal" size={13} /> SSH terminal
+                  </button>
+                  <button
+                    role="tab"
+                    aria-selected={consoleTab === "vnc"}
+                    className={cx("console-tab", consoleTab === "vnc" && "active")}
+                    onClick={() => setConsoleTab("vnc")}
+                  >
+                    <Icon name="activity" size={13} /> VNC
+                  </button>
+                  <span className="mono subtle small">{activeHost.label}</span>
+                </div>
+                {consoleTab === "cli" ? (
+                  <SshTerminal host={activeHost} onToast={onToast} />
+                ) : (
+                  <VncConsole host={activeHost} onToast={onToast} />
+                )}
+              </Panel>
+            ) : null}
 
             {snapshot ? (
               <div className="ssh-columns">
@@ -1190,11 +1231,11 @@ export function LinuxHosts({
             <div className="form-grid">
               <label className="field">
                 <span>Display name</span>
-                <input value={editing.label} onChange={(event) => patch({ label: event.target.value })} placeholder="vps-demo" />
+                <input value={editing.label} onChange={(event) => patch({ label: event.target.value })} placeholder="demo-dedicated" />
               </label>
               <label className="field">
                 <span>Host or IP</span>
-                <input value={editing.host} onChange={(event) => patch({ host: event.target.value })} placeholder="192.0.2.13" />
+                <input value={editing.host} onChange={(event) => patch({ host: event.target.value })} placeholder="203.0.113.20" />
               </label>
               <label className="field">
                 <span>Username</span>

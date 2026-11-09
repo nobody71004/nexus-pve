@@ -16,9 +16,12 @@ import type {
   SshHostSummary,
   SshRuntimeStatus,
   SshSnapshot,
+  TeamAuthState,
+  TeamUser,
   VmAction,
   VmSummary,
 } from "../shared/types";
+import { AuthScreen } from "./components/AuthScreen";
 import { Backdrop } from "./components/Backdrop";
 import { BackupStudio } from "./components/BackupStudio";
 import { CommandPalette, type Command } from "./components/CommandPalette";
@@ -29,9 +32,11 @@ import { LinuxHosts } from "./components/LinuxHosts";
 import { NodeCard } from "./components/NodeCard";
 import { SshServerCard } from "./components/SshServerCard";
 import { PipelineStudio } from "./components/PipelineStudio";
+import { RelayFabric } from "./components/RelayFabric";
 import { TitleBar } from "./components/TitleBar";
 import { Modal, Panel, Skeleton, StatTile, StatusDot, Toasts, type ToastItem } from "./components/ui";
 import { SecurityWorkspace } from "./components/SecurityWorkspace";
+import { TeamPanel } from "./components/TeamPanel";
 import { Throughput } from "./components/Throughput";
 import { VmDrawer } from "./components/VmDrawer";
 import { VmTable } from "./components/VmTable";
@@ -39,16 +44,18 @@ import { bridge, isMockBridge } from "./lib/bridge";
 import { ago, bytes, clock, cx, pct } from "./lib/format";
 import { helperAlertBreakdown, helperAlertCount, helperFleet, refreshHelpers, subscribeHelpers } from "./lib/helperFleet";
 
-type Tab = "overview" | "hosts" | "network" | "security" | "backups" | "pipelines" | "connections";
+type Tab = "overview" | "hosts" | "network" | "security" | "fabric" | "backups" | "pipelines" | "connections" | "team";
 
 const NAV: Array<{ id: Tab; label: string; icon: IconName }> = [
   { id: "overview", label: "Fleet overview", icon: "grid" },
   { id: "hosts", label: "Linux hosts", icon: "terminal" },
   { id: "network", label: "Network", icon: "activity" },
   { id: "security", label: "Security guard", icon: "shield" },
+  { id: "fabric", label: "Relay fabric", icon: "plug" },
   { id: "backups", label: "Backup studio", icon: "shield" },
   { id: "pipelines", label: "Agent pipelines", icon: "agent" },
   { id: "connections", label: "Connections", icon: "plug" },
+  { id: "team", label: "Team access", icon: "users" },
 ];
 
 const DESTRUCTIVE: VmAction[] = ["stop", "reset", "reboot", "shutdown"];
@@ -63,6 +70,113 @@ interface ConfirmState {
 }
 
 export function App() {
+  const [auth, setAuth] = useState<TeamAuthState | null>(null);
+  const [bootError, setBootError] = useState<string | null>(null);
+
+  const refreshAuth = useCallback(async () => {
+    try {
+      setAuth(await bridge.auth.status());
+    } catch (err) {
+      setBootError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    let live = true;
+    void bridge.auth
+      .status()
+      .then((state) => {
+        if (live) setAuth(state);
+      })
+      .catch((err) => {
+        if (live) setBootError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    return bridge.onEvent((event) => {
+      if (event.type === "team-sync") void refreshAuth();
+    });
+  }, [refreshAuth]);
+
+  if (bootError) {
+    return (
+      <div className="app auth-boot">
+        <Backdrop reduced={false} />
+        <section className="auth-boot-card" role="alert">
+          <span className="auth-glyph">
+            <Icon name="alert" size={24} />
+          </span>
+          <span className="eyebrow">WORKSPACE UNAVAILABLE</span>
+          <h1>Nexus could not open the team workspace.</h1>
+          <p>{bootError}</p>
+          <button className="btn primary" onClick={() => window.location.reload()}>
+            <Icon name="refresh" size={13} /> Try again
+          </button>
+        </section>
+      </div>
+    );
+  }
+
+  if (!auth) {
+    return (
+      <div className="app auth-boot">
+        <Backdrop reduced={false} />
+        <div className="auth-boot-mark">
+          <span className="brand-mark live">
+            <i />
+            <i />
+            <i />
+          </span>
+          <span className="eyebrow">LOADING TEAM WORKSPACE</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!auth.user) {
+    return (
+      <AuthScreen
+        initialized={auth.initialized}
+        onAuthenticated={(user) => {
+          setAuth({ initialized: true, user, expiresAt: Date.now() + 12 * 60 * 60 * 1000 });
+          void refreshAuth();
+        }}
+        onWorkspaceChanged={() => void refreshAuth()}
+      />
+    );
+  }
+
+  return (
+    <Workspace
+      currentUser={auth.user}
+      sessionExpiresAt={auth.expiresAt}
+      onUserChange={(user) => setAuth((current) => ({ initialized: true, user, expiresAt: current?.expiresAt ?? Date.now() + 12 * 60 * 60 * 1000 }))}
+      onLogout={async () => {
+        try {
+          await bridge.auth.logout();
+        } finally {
+          setAuth({ initialized: true, user: null, expiresAt: 0 });
+        }
+      }}
+    />
+  );
+}
+
+function Workspace({
+  currentUser,
+  sessionExpiresAt,
+  onUserChange,
+  onLogout,
+}: {
+  currentUser: TeamUser;
+  sessionExpiresAt: number | null;
+  onUserChange: (user: TeamUser) => void;
+  onLogout: () => Promise<void>;
+}) {
   const [hosts, setHosts] = useState<HostSummary[]>([]);
   const [activeHostId, setActiveHostId] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<FleetSnapshot | null>(null);
@@ -72,7 +186,9 @@ export function App() {
   const [sshSnapshots, setSshSnapshots] = useState<Record<string, SshSnapshot>>({});
   const [sshStatuses, setSshStatuses] = useState<Record<string, SshRuntimeStatus>>({});
   const [sshFleetError, setSshFleetError] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("overview");
+  const [expiresAt, setExpiresAt] = useState<number | null>(sessionExpiresAt);
+  const [clockNow, setClockNow] = useState(Date.now());
+  const [tab, setTab] = useState<Tab>(currentUser.role === "user" ? "hosts" : "overview");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -105,6 +221,26 @@ export function App() {
     }, level === "error" ? 9000 : 5200);
     toastTimers.current.push(timer);
   }, []);
+
+  useEffect(() => {
+    setExpiresAt(sessionExpiresAt);
+  }, [sessionExpiresAt]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const extendSession = useCallback(async () => {
+    try {
+      const state = await bridge.auth.refreshSession();
+      setExpiresAt(state.expiresAt);
+      setClockNow(Date.now());
+      notify("ok", "Session extended", "This computer stays signed in for another 12 hours.");
+    } catch (err) {
+      notify("error", "Could not extend session", err instanceof Error ? err.message : String(err));
+    }
+  }, [notify]);
 
   useEffect(() => {
     return () => toastTimers.current.forEach((timer) => window.clearTimeout(timer));
@@ -142,6 +278,13 @@ export function App() {
   }, []);
 
   const activeHost = useMemo(() => hosts.find((host) => host.id === activeHostId) ?? null, [hosts, activeHostId]);
+  const visibleNav = useMemo(
+    () =>
+      currentUser.role === "user"
+        ? NAV.filter((item) => item.id === "hosts" || item.id === "network" || item.id === "team")
+        : NAV,
+    [currentUser.role],
+  );
 
   // The rail badge is fleet-wide, so it is checked even while the user is on a
   // Proxmox tab. A five-minute refresh is cheap (one command per Linux host),
@@ -767,7 +910,7 @@ export function App() {
         if (pipeline) void startPipeline(pipeline, {});
         setTab("pipelines");
       } },
-      ...NAV.map((item) => ({
+      ...visibleNav.map((item) => ({
         id: `nav-${item.id}`,
         label: item.label,
         hint: "go to workspace",
@@ -785,10 +928,12 @@ export function App() {
       })),
       { id: "motion", label: motion ? "Reduce motion" : "Enable motion", hint: "visual effects", icon: "zap", group: "Interface", run: toggleMotion },
       { id: "mcp", label: "Install MCP config for Claude Desktop", hint: "agent access", icon: "agent", group: "Interface", run: () => void writeMcp("claude") },
-      { id: "add", label: "Add a Proxmox host", hint: "new connection", icon: "plus", group: "Hosts", run: () => setTab("connections") },
+      ...(currentUser.role === "user"
+        ? []
+        : [{ id: "add", label: "Add a Proxmox host", hint: "new connection", icon: "plus" as IconName, group: "Hosts", run: () => setTab("connections") }]),
     ];
     return list;
-  }, [hosts, motion, pipelines, refreshFleet, refreshSshFleet, startPipeline, toggleMotion, writeMcp]);
+  }, [currentUser.role, hosts, motion, pipelines, refreshFleet, refreshSshFleet, startPipeline, toggleMotion, visibleNav, writeMcp]);
 
   /* ----------------------------------------------------------------- render */
 
@@ -804,7 +949,7 @@ export function App() {
             <em>OPS CONSOLE</em>
           </div>
           <div className="rail-nav">
-            {NAV.map((item) => (
+            {visibleNav.map((item) => (
               <button
                 key={item.id}
                 className={cx("rail-item", tab === item.id && "active")}
@@ -832,6 +977,7 @@ export function App() {
             ))}
           </div>
 
+          {currentUser.role !== "user" ? (
           <div className="rail-hosts">
             <span className="rail-caption">ENDPOINTS</span>
             {hosts.map((host) => {
@@ -856,6 +1002,7 @@ export function App() {
               <Icon name="plus" size={13} /> Add endpoint
             </button>
           </div>
+          ) : null}
 
           <div className="rail-foot">
             <div className="rail-sync">
@@ -864,6 +1011,16 @@ export function App() {
                 <strong>{health === "online" ? "Live telemetry" : health}</strong>
                 <span className="mono">{snapshot ? `synced ${ago(snapshot.fetchedAt)}` : "waiting for host"}</span>
               </div>
+            </div>
+            <div className="rail-user">
+              <span className="avatar">{currentUser.displayName.trim().split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || currentUser.username.slice(0, 2).toUpperCase()}</span>
+              <div>
+                <strong>{currentUser.displayName}</strong>
+                <span className="mono">@{currentUser.username} · {currentUser.role === "admin" ? "Admin" : currentUser.role === "moderator" ? "Mod" : "Member"}</span>
+              </div>
+              <button className="btn icon ghost" onClick={() => void onLogout()} title="Sign out">
+                <Icon name="logout" size={13} />
+              </button>
             </div>
             {info ? <span className="rail-version mono">v{info.version} · {isMockBridge ? "preview" : "desktop"}</span> : null}
           </div>
@@ -882,11 +1039,15 @@ export function App() {
                       ? "Network throughput"
                       : tab === "security"
                       ? "Security guard"
+                      : tab === "fabric"
+                      ? "Relay fabric"
                       : tab === "backups"
                       ? "Backup studio"
                       : tab === "pipelines"
                         ? "Agent pipelines"
-                        : "Connections"}
+                        : tab === "team"
+                          ? "Team access"
+                          : "Connections"}
               </h1>
               <p>
                 {tab === "overview"
@@ -897,11 +1058,15 @@ export function App() {
                       ? "Measured download, upload and RTT per endpoint, next to the link rate the NIC negotiates."
                       : tab === "security"
                       ? "A 24/7 auditor with layered protections, plus the edge DDoS shield that fronts the game stack."
+                      : tab === "fabric"
+                      ? "Encrypted multi-hop relay chains: one public entry, private WireGuard hops, and a single origin."
                       : tab === "backups"
                       ? "Archives, schedules, restore and verification."
                       : tab === "pipelines"
                         ? "Multi-step agent operations with explicit human approval gates."
-                        : "Proxmox API endpoints and credential handling."}
+                        : tab === "team"
+                          ? "Accounts, roles, machine grants and the workspace audit trail."
+                          : "Proxmox API endpoints and credential handling."}
               </p>
             </div>
 
@@ -933,12 +1098,31 @@ export function App() {
             </div>
           </header>
 
+          {expiresAt !== null && expiresAt - clockNow < 10 * 60 * 1000 ? (
+            <SessionBanner
+              expiresAt={expiresAt}
+              now={clockNow}
+              onExtend={() => void extendSession()}
+              onLogout={() => void onLogout()}
+            />
+          ) : null}
+
           {tab === "hosts" ? (
-            <LinuxHosts onToast={notify} onOpenNetwork={() => setTab("network")} />
+            <LinuxHosts onToast={notify} onOpenNetwork={() => setTab("network")} canManage={currentUser.role !== "user"} />
+          ) : tab === "team" ? (
+            <TeamPanel
+              currentUser={currentUser}
+              onCurrentUserChange={onUserChange}
+              onOpenHosts={() => setTab("hosts")}
+              onRefreshHosts={() => void refreshSshFleet()}
+              onToast={notify}
+            />
           ) : tab === "network" ? (
             <Throughput onToast={notify} />
           ) : tab === "security" ? (
             <SecurityWorkspace onToast={notify} onOpenConnections={() => setTab("connections")} />
+          ) : tab === "fabric" ? (
+            <RelayFabric onToast={notify} onOpenConnections={() => setTab("connections")} />
           ) : !activeHostId ? (
             <Panel eyebrow="GET STARTED" title="Connect your first Proxmox endpoint">
               <div className="hero-empty">
@@ -1346,6 +1530,46 @@ export function App() {
       ) : null}
 
       <Toasts items={toasts} dismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))} />
+    </div>
+  );
+}
+
+function SessionBanner({
+  expiresAt,
+  now,
+  onExtend,
+  onLogout,
+}: {
+  expiresAt: number;
+  now: number;
+  onExtend: () => void;
+  onLogout: () => void;
+}) {
+  const remaining = expiresAt - now;
+  const expired = remaining <= 0;
+  const minutes = Math.max(0, Math.ceil(remaining / 60_000));
+  return (
+    <div className={cx("session-banner", expired && "expired")} role={expired ? "alert" : undefined}>
+      <span className="session-banner-mark">
+        <Icon name={expired ? "alert" : "lock"} size={15} />
+      </span>
+      <div className="session-banner-copy">
+        <strong>{expired ? "Your session has expired" : `Session expires in ${minutes} minute${minutes === 1 ? "" : "s"}`}</strong>
+        <span>
+          {expired
+            ? "Sign in again to continue. Unsaved form values are not recoverable."
+            : "Extend now to keep this Nexus station signed in for another 12 hours."}
+        </span>
+      </div>
+      {expired ? (
+        <button className="btn small primary" onClick={onLogout}>
+          Sign in again
+        </button>
+      ) : (
+        <button className="btn small primary" onClick={onExtend}>
+          <Icon name="refresh" size={12} /> Extend session
+        </button>
+      )}
     </div>
   );
 }

@@ -1,10 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { BrowserWindow, Menu, app, session } from "electron";
+import { BrowserWindow, Menu, app, dialog, session } from "electron";
 import type { NexusEvent } from "../shared/types";
 import { IPC } from "../shared/ipc";
 import { registerIpc } from "./ipc";
 import { createRuntime } from "./agent/runtime";
+import { TeamService } from "./team/store";
+import { TeamSyncService } from "./team/sync";
 
 app.setName("NexusPVE");
 const appRoot = app.getAppPath();
@@ -24,6 +26,8 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 let window: BrowserWindow | null = null;
+let team: TeamService | null = null;
+let teamSync: TeamSyncService | null = null;
 
 function broadcast(event: NexusEvent): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -88,18 +92,42 @@ function createWindow(): void {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
 
-  const runtime = createRuntime(appRoot, broadcast);
-  registerIpc(runtime);
+  try {
+    const runtime = createRuntime(appRoot, broadcast);
+    team = await TeamService.open(appRoot);
+    teamSync = new TeamSyncService(team, (status) => broadcast({ type: "team-sync", teamSync: status }));
+    registerIpc(runtime, team, teamSync);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    dialog.showErrorBox("Nexus could not start", `The team database could not be opened.\n\n${message}`);
+    app.quit();
+    return;
+  }
 
   createWindow();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+app.on("before-quit", () => {
+  try {
+    teamSync?.close();
+  } catch (error) {
+    console.error("[nexus] could not stop team sync", error);
+  }
+  teamSync = null;
+  try {
+    team?.close();
+  } catch (error) {
+    console.error("[nexus] could not flush the team database", error);
+  }
+  team = null;
 });
 
 app.on("window-all-closed", () => {

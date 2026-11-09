@@ -14,12 +14,14 @@
     "build": "npm run build:renderer && npm run build:main",
     "build:renderer": "vite build",
     "build:main": "node scripts/build-electron.mjs",
+    "icon": "node scripts/build-icon.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "start": "npm run build && electron .",
-    "package": "npm run build && electron-builder --win",
+    "package": "npm run icon && npm run build && electron-builder --win",
     "package:dir": "npm run build && electron-builder --win --dir",
     "mcp": "node dist-electron/mcp-server.cjs",
     "mock:pve": "node scripts/mock-pve.mjs",
+    "sync:server": "node scripts/team-sync-server.mjs",
     "smoke": "node scripts/agent-smoke.mjs",
     "test": "node tests/run-edge-tests.mjs",
     "preflight": "npm run typecheck && npm run build && npm test && npm run smoke",
@@ -29,7 +31,9 @@
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
+    "@types/sql.js": "^1.4.11",
     "@types/ssh2": "^1.15.6",
+    "@types/ws": "^8.18.2",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
     "cross-env": "^7.0.3",
@@ -41,9 +45,12 @@
     "wait-on": "^8.0.2"
   },
   "dependencies": {
+    "@novnc/novnc": "^1.7.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "ssh2": "^1.17.0"
+    "sql.js": "^1.15.2",
+    "ssh2": "^1.17.0",
+    "ws": "^8.22.2"
   },
   "build": {
     "appId": "dev.nexus.pve",
@@ -66,6 +73,7 @@
       "dist-electron/mcp-server.cjs"
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "portable",

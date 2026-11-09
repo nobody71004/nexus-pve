@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { BrowserWindow, app, ipcMain, shell } from "electron";
+import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import { IPC } from "../shared/ipc";
 import type {
   BackupRunRequest,
@@ -11,9 +11,17 @@ import type {
   ScheduleInput,
   SshAction,
   SshHostInput,
+  TeamBootstrapInput,
+  TeamAuditFilter,
+  TeamLoginInput,
+  TeamSyncConfigInput,
+  TeamUserInput,
+  TeamUserPatch,
   VmAction,
   VmType,
 } from "../shared/types";
+import type { TeamService } from "./team/store";
+import type { TeamSyncService } from "./team/sync";
 import { normalizeBaseUrl } from "./config";
 import { nexusHome } from "./paths";
 import { createSnapshot, deleteSnapshot, rollbackSnapshot } from "./pve/api";
@@ -32,6 +40,9 @@ import { checkHelper, installHelper } from "./ssh/helper";
 import { guardian } from "./security/guardian";
 import { ddos } from "./ddos/service";
 import type { DdosConfig, DdosMode } from "../shared/ddos-types";
+import { relay } from "./relay/service";
+import { vnc } from "./vnc/service";
+import type { RelayChainInput } from "../shared/fabric-types";
 import {
   actOnVm,
   collectSnapshot,
@@ -66,8 +77,20 @@ function vmType(value: unknown): VmType {
   throw new Error("VM type must be qemu or lxc");
 }
 
-export function registerIpc(runtime: Runtime): void {
+export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamSyncService): void {
   const { store, registry, pipelines } = runtime;
+  const requireOperator = () => {
+    const user = team.currentUser();
+    if (user.role === "user") throw new Error("Admin or moderator access required.");
+    return user;
+  };
+  const guardSshHost = (hostId: string) => {
+    const user = team.currentUser();
+    if (user.role === "user" && !team.canAccessMachine(user.id, hostId)) {
+      throw new Error("This machine is not linked to your account. Ask an admin for access.");
+    }
+    return user;
+  };
 
   ipcMain.handle(IPC.appInfo, () => ({
     version: app.getVersion(),
@@ -95,9 +118,81 @@ export function registerIpc(runtime: Runtime): void {
     await shell.openExternal(target);
   });
 
-  ipcMain.handle(IPC.hostsList, () => store.hosts().map(({ secretEnc: _secret, ...rest }) => rest));
+  ipcMain.handle(IPC.authStatus, () => team.status());
+  ipcMain.handle(IPC.authBootstrap, (_event, input: TeamBootstrapInput) =>
+    team.bootstrap(input ?? ({} as TeamBootstrapInput)),
+  );
+  ipcMain.handle(IPC.authLogin, (_event, input: TeamLoginInput) => team.login(input ?? ({} as TeamLoginInput)));
+  ipcMain.handle(IPC.authLogout, () => team.logout());
+  ipcMain.handle(IPC.authRefreshSession, () => team.refreshSession());
+  ipcMain.handle(IPC.authChangePassword, (_event, currentPassword: unknown, nextPassword: unknown) =>
+    team.changePassword(str(currentPassword, "current password"), str(nextPassword, "new password")),
+  );
+
+  ipcMain.handle(IPC.teamOverview, () => {
+    team.syncMachines(listSshHosts(store));
+    return team.overview();
+  });
+  ipcMain.handle(IPC.teamCreateUser, (_event, input: TeamUserInput) =>
+    team.createUser(input ?? ({} as TeamUserInput)),
+  );
+  ipcMain.handle(IPC.teamUpdateUser, (_event, id: unknown, patch: TeamUserPatch) =>
+    team.updateUser(str(id, "member id"), patch ?? ({} as TeamUserPatch)),
+  );
+  ipcMain.handle(IPC.teamDeleteUser, (_event, id: unknown) => team.deleteUser(str(id, "member id")));
+  ipcMain.handle(IPC.teamSetMachineLinks, (_event, machineId: unknown, userIds: unknown) => {
+    team.syncMachines(listSshHosts(store));
+    const ids = Array.isArray(userIds) ? userIds.filter((id): id is string => typeof id === "string" && id.length > 0) : [];
+    return team.setMachineLinks(str(machineId, "machine id"), ids);
+  });
+  ipcMain.handle(IPC.teamAudit, (_event, filter: TeamAuditFilter | undefined) =>
+    team.auditLog(filter ?? {}),
+  );
+  ipcMain.handle(IPC.teamAuditExport, async (event, filter: TeamAuditFilter | undefined) => {
+    const audit = team.auditCsv(filter ?? {});
+    const stamp = new Date().toISOString().slice(0, 10);
+    const filename = `nexus-team-audit-${stamp}.csv`;
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const options = {
+      title: "Export team audit log",
+      defaultPath: path.join(app.getPath("documents"), filename),
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    };
+    const choice = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
+    if (choice.canceled || !choice.filePath) return { count: 0, filename: "", path: "" };
+    fs.writeFileSync(choice.filePath, audit.csv, { mode: 0o600 });
+    team.recordAuditExport(audit.count);
+    return { count: audit.count, filename: path.basename(choice.filePath), path: choice.filePath };
+  });
+
+  const allowSyncManagement = () => {
+    const state = team.status();
+    if (state.initialized && state.user?.role !== "admin") {
+      throw new Error("Only an active admin can change cross-device sync.");
+    }
+    return state;
+  };
+  ipcMain.handle(IPC.teamSyncStatus, () => teamSync.status());
+  ipcMain.handle(IPC.teamSyncConfigure, (_event, input: TeamSyncConfigInput) => {
+    allowSyncManagement();
+    return teamSync.configure(input ?? ({} as TeamSyncConfigInput));
+  });
+  ipcMain.handle(IPC.teamSyncNow, () => {
+    allowSyncManagement();
+    return teamSync.syncNow();
+  });
+  ipcMain.handle(IPC.teamSyncDisable, () => {
+    allowSyncManagement();
+    return teamSync.disable();
+  });
+
+  ipcMain.handle(IPC.hostsList, () => {
+    if (team.currentUser().role === "user") return [];
+    return store.hosts().map(({ secretEnc: _secret, ...rest }) => rest);
+  });
 
   ipcMain.handle(IPC.hostsSave, (_event, input: HostInput) => {
+    requireOperator();
     const saved = store.saveHost({ ...input, baseUrl: normalizeBaseUrl(input.baseUrl) });
     dropClient(saved.id);
     invalidate(saved.id);
@@ -105,78 +200,151 @@ export function registerIpc(runtime: Runtime): void {
   });
 
   ipcMain.handle(IPC.hostsRemove, (_event, id: unknown) => {
+    requireOperator();
     const hostId = str(id, "host id");
     store.removeHost(hostId);
     dropClient(hostId);
     invalidate(hostId);
   });
 
-  ipcMain.handle(IPC.hostsTest, (_event, input: HostInput) =>
-    testHost({ ...input, baseUrl: normalizeBaseUrl(input.baseUrl) }),
-  );
+  ipcMain.handle(IPC.hostsTest, (_event, input: HostInput) => {
+    requireOperator();
+    return testHost({ ...input, baseUrl: normalizeBaseUrl(input.baseUrl) });
+  });
 
-  ipcMain.handle(IPC.sshHostsList, () => listSshHosts(store));
-  ipcMain.handle(IPC.sshHostsSave, (_event, input: SshHostInput) => saveSshHost(store, input));
-  ipcMain.handle(IPC.sshHostsRemove, (_event, id: unknown) => removeSshHost(store, str(id, "host id")));
-  ipcMain.handle(IPC.sshHostsTest, (_event, input: SshHostInput) => testSshHost(input));
-  ipcMain.handle(IPC.sshSnapshot, (_event, hostId: unknown) => collectSshSnapshot(store, str(hostId, "host id")));
-  ipcMain.handle(IPC.sshHealth, () => probeSshHealth(store));
-  ipcMain.handle(IPC.sshExec, (_event, hostId, command, options) =>
-    execOnHost(store, str(hostId, "host id"), str(command, "command"), {
+  ipcMain.handle(IPC.sshHostsList, () => {
+    const user = team.currentUser();
+    const all = listSshHosts(store);
+    team.syncMachines(all);
+    return user.role === "user" ? all.filter((host) => team.canAccessMachine(user.id, host.id)) : all;
+  });
+  ipcMain.handle(IPC.sshHostsSave, (_event, input: SshHostInput) => {
+    const user = requireOperator();
+    const saved = saveSshHost(store, input);
+    team.syncMachines(listSshHosts(store));
+    void user;
+    return saved;
+  });
+  ipcMain.handle(IPC.sshHostsRemove, (_event, id: unknown) => {
+    const user = requireOperator();
+    const hostId = str(id, "host id");
+    removeSshHost(store, hostId);
+    team.removeMachine(hostId, user);
+  });
+  ipcMain.handle(IPC.sshHostsTest, (_event, input: SshHostInput) => {
+    requireOperator();
+    return testSshHost(input);
+  });
+  ipcMain.handle(IPC.sshSnapshot, (_event, hostId: unknown) => {
+    const id = str(hostId, "host id");
+    guardSshHost(id);
+    return collectSshSnapshot(store, id);
+  });
+  ipcMain.handle(IPC.sshHealth, async () => {
+    const user = team.currentUser();
+    const results = await probeSshHealth(store);
+    return user.role === "user" ? results.filter((entry) => team.canAccessMachine(user.id, entry.id)) : results;
+  });
+  ipcMain.handle(IPC.sshExec, (_event, hostId, command, options) => {
+    const id = str(hostId, "host id");
+    guardSshHost(id);
+    return execOnHost(store, id, str(command, "command"), {
       allowShell: Boolean(options && typeof options === "object" && (options as { shell?: boolean }).shell),
       timeoutMs: typeof options === "object" && options && Number((options as { timeoutMs?: number }).timeoutMs) > 0
         ? Number((options as { timeoutMs?: number }).timeoutMs)
         : undefined,
-    }),
-  );
-  ipcMain.handle(IPC.sshSpeedtest, (_event, hostId: unknown) => runSpeedTest(store, str(hostId, "host id")));
-  ipcMain.handle(IPC.sshSpeedtestAll, () => runSpeedTestAll(store));
-  ipcMain.handle(IPC.sshAction, (_event, hostId, action, target) =>
-    actOnSshHost(store, str(hostId, "host id"), str(action, "action") as SshAction, typeof target === "string" ? target : undefined),
-  );
-  ipcMain.handle(IPC.sshHelper, (_event, hostId: unknown) =>
-    checkHelper(store, app.getAppPath(), str(hostId, "host id")),
-  );
-  ipcMain.handle(IPC.sshHelperInstall, (_event, hostId: unknown, sudoPassword: unknown) =>
-    installHelper(store, app.getAppPath(), str(hostId, "host id"), typeof sudoPassword === "string" ? sudoPassword : undefined, {
+    });
+  });
+  ipcMain.handle(IPC.sshSpeedtest, (_event, hostId: unknown) => {
+    const id = str(hostId, "host id");
+    guardSshHost(id);
+    return runSpeedTest(store, id);
+  });
+  ipcMain.handle(IPC.sshSpeedtestAll, () => {
+    const user = team.currentUser();
+    const allowed = user.role === "user"
+      ? listSshHosts(store).filter((host) => team.canAccessMachine(user.id, host.id)).map((host) => host.id)
+      : undefined;
+    return runSpeedTestAll(store, allowed);
+  });
+  ipcMain.handle(IPC.sshAction, (_event, hostId, action, target) => {
+    const id = str(hostId, "host id");
+    guardSshHost(id);
+    return actOnSshHost(store, id, str(action, "action") as SshAction, typeof target === "string" ? target : undefined);
+  });
+  ipcMain.handle(IPC.sshHelper, (_event, hostId: unknown) => {
+    const id = str(hostId, "host id");
+    guardSshHost(id);
+    return checkHelper(store, app.getAppPath(), id);
+  });
+  ipcMain.handle(IPC.sshHelperInstall, (_event, hostId: unknown, sudoPassword: unknown) => {
+    const id = str(hostId, "host id");
+    guardSshHost(id);
+    return installHelper(store, app.getAppPath(), id, typeof sudoPassword === "string" ? sudoPassword : undefined, {
       trigger: "manual",
-    }),
-  );
+    });
+  });
 
-  ipcMain.handle(IPC.securityOverview, () => guardian.overview());
-  ipcMain.handle(IPC.securityScan, (_event, hostId: unknown) => guardian.scan(str(hostId, "host id")));
-  ipcMain.handle(IPC.securityEnforce, (_event, hostId: unknown, action: unknown, options: unknown) =>
-    guardian.enforce(str(hostId, "host id"), str(action, "action"), {
+  ipcMain.handle(IPC.securityOverview, () => {
+    requireOperator();
+    return guardian.overview();
+  });
+  ipcMain.handle(IPC.securityScan, (_event, hostId: unknown) => {
+    requireOperator();
+    return guardian.scan(str(hostId, "host id"));
+  });
+  ipcMain.handle(IPC.securityEnforce, (_event, hostId: unknown, action: unknown, options: unknown) => {
+    requireOperator();
+    return guardian.enforce(str(hostId, "host id"), str(action, "action"), {
       confirm: Boolean((options as { confirm?: boolean } | undefined)?.confirm),
-    }),
-  );
-  ipcMain.handle(IPC.securityPolicy, (_event, patch: unknown) =>
-    guardian.setPolicy((patch ?? {}) as Record<string, unknown>),
-  );
-  ipcMain.handle(IPC.securityJournal, (_event, limit: unknown) =>
-    guardian.journal.list(typeof limit === "number" ? limit : 200),
-  );
-  ipcMain.handle(IPC.securityAcceptBaseline, (_event, hostId: unknown) => guardian.acceptBaseline(str(hostId, "host id")));
-  ipcMain.handle(IPC.securityVerify, () => guardian.journal.verify());
-  ipcMain.handle(IPC.securityResident, (_event, hostId: unknown, enable: unknown) =>
-    guardian.resident(str(hostId, "host id"), enable === true),
-  );
-  ipcMain.handle(IPC.securityBan, (_event, hostId: unknown, address: unknown) =>
-    guardian.ban(str(hostId, "host id"), str(address, "address")),
-  );
-  ipcMain.handle(IPC.securityBans, (_event, hostId: unknown) => guardian.bans(str(hostId, "host id")));
+    });
+  });
+  ipcMain.handle(IPC.securityPolicy, (_event, patch: unknown) => {
+    requireOperator();
+    return guardian.setPolicy((patch ?? {}) as Record<string, unknown>);
+  });
+  ipcMain.handle(IPC.securityJournal, (_event, limit: unknown) => {
+    requireOperator();
+    return guardian.journal.list(typeof limit === "number" ? limit : 200);
+  });
+  ipcMain.handle(IPC.securityAcceptBaseline, (_event, hostId: unknown) => {
+    requireOperator();
+    return guardian.acceptBaseline(str(hostId, "host id"));
+  });
+  ipcMain.handle(IPC.securityVerify, () => {
+    requireOperator();
+    return guardian.journal.verify();
+  });
+  ipcMain.handle(IPC.securityResident, (_event, hostId: unknown, enable: unknown) => {
+    requireOperator();
+    return guardian.resident(str(hostId, "host id"), enable === true);
+  });
+  ipcMain.handle(IPC.securityBan, (_event, hostId: unknown, address: unknown) => {
+    requireOperator();
+    return guardian.ban(str(hostId, "host id"), str(address, "address"));
+  });
+  ipcMain.handle(IPC.securityBans, (_event, hostId: unknown) => {
+    requireOperator();
+    return guardian.bans(str(hostId, "host id"));
+  });
 
-  ipcMain.handle(IPC.pveSnapshot, (_event, hostId: unknown) => collectSnapshot(store, str(hostId, "host id")));
+  ipcMain.handle(IPC.pveSnapshot, (_event, hostId: unknown) => {
+    requireOperator();
+    return collectSnapshot(store, str(hostId, "host id"));
+  });
 
-  ipcMain.handle(IPC.pveVmDetail, (_event, hostId, node, type, vmid) =>
-    getVmDetail(store, str(hostId, "host id"), str(node, "node"), vmType(type), num(vmid, "vmid")),
-  );
+  ipcMain.handle(IPC.pveVmDetail, (_event, hostId, node, type, vmid) => {
+    requireOperator();
+    return getVmDetail(store, str(hostId, "host id"), str(node, "node"), vmType(type), num(vmid, "vmid"));
+  });
 
-  ipcMain.handle(IPC.pveVmAction, (_event, hostId, node, type, vmid, action) =>
-    actOnVm(store, str(hostId, "host id"), str(node, "node"), vmType(type), num(vmid, "vmid"), str(action, "action") as VmAction),
-  );
+  ipcMain.handle(IPC.pveVmAction, (_event, hostId, node, type, vmid, action) => {
+    requireOperator();
+    return actOnVm(store, str(hostId, "host id"), str(node, "node"), vmType(type), num(vmid, "vmid"), str(action, "action") as VmAction);
+  });
 
   ipcMain.handle(IPC.pveSnapshotCreate, async (_event, hostId, node, type, vmid, name, description) => {
+    requireOperator();
     const host = str(hostId, "host id");
     const upid = await createSnapshot(
       hostClient(store, host),
@@ -191,6 +359,7 @@ export function registerIpc(runtime: Runtime): void {
   });
 
   ipcMain.handle(IPC.pveSnapshotRollback, async (_event, hostId, node, type, vmid, name) => {
+    requireOperator();
     const host = str(hostId, "host id");
     const upid = await rollbackSnapshot(hostClient(store, host), str(node, "node"), vmType(type), num(vmid, "vmid"), str(name, "snapshot name"));
     invalidate(host);
@@ -198,42 +367,52 @@ export function registerIpc(runtime: Runtime): void {
   });
 
   ipcMain.handle(IPC.pveSnapshotDelete, async (_event, hostId, node, type, vmid, name) => {
+    requireOperator();
     const host = str(hostId, "host id");
     await deleteSnapshot(hostClient(store, host), str(node, "node"), vmType(type), num(vmid, "vmid"), str(name, "snapshot name"));
     invalidate(host);
   });
 
-  ipcMain.handle(IPC.pveTaskLog, (_event, hostId, node, upid) =>
-    taskLog(store, str(hostId, "host id"), str(node, "node"), str(upid, "upid")),
-  );
+  ipcMain.handle(IPC.pveTaskLog, (_event, hostId, node, upid) => {
+    requireOperator();
+    return taskLog(store, str(hostId, "host id"), str(node, "node"), str(upid, "upid"));
+  });
 
   ipcMain.handle(IPC.pveNodeRrd, (_event, hostId, node, timeframe) => {
+    requireOperator();
     const frame = timeframe === "day" || timeframe === "week" ? timeframe : "hour";
     return nodeRrd(store, str(hostId, "host id"), str(node, "node"), frame);
   });
 
-  ipcMain.handle(IPC.backupArchives, (_event, hostId) => listArchives(store, str(hostId, "host id")));
+  ipcMain.handle(IPC.backupArchives, (_event, hostId) => {
+    requireOperator();
+    return listArchives(store, str(hostId, "host id"));
+  });
 
-  ipcMain.handle(IPC.backupRun, (_event, hostId, req: BackupRunRequest) =>
-    startBackup(store, str(hostId, "host id"), { ...req, node: str(req?.node, "node") }),
-  );
+  ipcMain.handle(IPC.backupRun, (_event, hostId, req: BackupRunRequest) => {
+    requireOperator();
+    return startBackup(store, str(hostId, "host id"), { ...req, node: str(req?.node, "node") });
+  });
 
-  ipcMain.handle(IPC.backupRestore, (_event, hostId, req: RestoreRequest) =>
-    restore(store, str(hostId, "host id"), {
+  ipcMain.handle(IPC.backupRestore, (_event, hostId, req: RestoreRequest) => {
+    requireOperator();
+    return restore(store, str(hostId, "host id"), {
       ...req,
       node: str(req?.node, "node"),
       vmid: num(req?.vmid, "vmid"),
       archive: str(req?.archive, "archive"),
       type: req?.type === "lxc" ? "lxc" : "qemu",
-    }),
-  );
+    });
+  });
 
-  ipcMain.handle(IPC.backupRemove, (_event, hostId, node, storage, volid) =>
-    removeArchive(store, str(hostId, "host id"), str(node, "node"), str(storage, "storage"), str(volid, "volid")),
-  );
+  ipcMain.handle(IPC.backupRemove, (_event, hostId, node, storage, volid) => {
+    requireOperator();
+    return removeArchive(store, str(hostId, "host id"), str(node, "node"), str(storage, "storage"), str(volid, "volid"));
+  });
 
-  ipcMain.handle(IPC.backupScheduleSave, (_event, hostId, input: ScheduleInput) =>
-    persistSchedule(store, str(hostId, "host id"), {
+  ipcMain.handle(IPC.backupScheduleSave, (_event, hostId, input: ScheduleInput) => {
+    requireOperator();
+    return persistSchedule(store, str(hostId, "host id"), {
       ...input,
       node: str(input?.node, "node"),
       storage: str(input?.storage, "storage"),
@@ -241,49 +420,97 @@ export function registerIpc(runtime: Runtime): void {
       mode: input?.mode ?? "snapshot",
       compress: input?.compress ?? "zstd",
       enabled: input?.enabled !== false,
-    }),
-  );
+    });
+  });
 
-  ipcMain.handle(IPC.backupScheduleDelete, (_event, hostId, id) =>
-    removeSchedule(store, str(hostId, "host id"), str(id, "schedule id")),
-  );
+  ipcMain.handle(IPC.backupScheduleDelete, (_event, hostId, id) => {
+    requireOperator();
+    return removeSchedule(store, str(hostId, "host id"), str(id, "schedule id"));
+  });
 
   ipcMain.handle(IPC.pipelineList, () => pipelines.definitions());
   ipcMain.handle(IPC.pipelineRuns, () => pipelines.history());
-  ipcMain.handle(IPC.pipelineRun, (_event, pipelineId, hostId, vars) =>
-    pipelines.start(str(pipelineId, "pipeline"), str(hostId, "host"), vars && typeof vars === "object" ? vars : {}),
-  );
-  ipcMain.handle(IPC.pipelineApprove, (_event, runId, approved) =>
-    pipelines.approve(str(runId, "run id"), approved === true),
-  );
-  ipcMain.handle(IPC.pipelineCancel, (_event, runId) => pipelines.cancel(str(runId, "run id")));
+  ipcMain.handle(IPC.pipelineRun, (_event, pipelineId, hostId, vars) => {
+    requireOperator();
+    return pipelines.start(str(pipelineId, "pipeline"), str(hostId, "host"), vars && typeof vars === "object" ? vars : {});
+  });
+  ipcMain.handle(IPC.pipelineApprove, (_event, runId, approved) => {
+    requireOperator();
+    return pipelines.approve(str(runId, "run id"), approved === true);
+  });
+  ipcMain.handle(IPC.pipelineCancel, (_event, runId) => {
+    requireOperator();
+    return pipelines.cancel(str(runId, "run id"));
+  });
 
-  ipcMain.handle(IPC.ddosOverview, () => ddos.overview());
-  ipcMain.handle(IPC.ddosStatus, (_event, hostId: unknown) => ddos.status(str(hostId, "host id"), true));
-  ipcMain.handle(IPC.ddosInstall, (_event, hostId: unknown) => ddos.install(str(hostId, "host id")));
-  ipcMain.handle(IPC.ddosMode, (_event, hostId: unknown, mode: unknown) =>
-    ddos.setMode(str(hostId, "host id"), str(mode, "mode") as DdosMode),
-  );
-  ipcMain.handle(IPC.ddosBan, (_event, hostId: unknown, ip: unknown, seconds: unknown, reason: unknown) =>
-    ddos.ban(
+  ipcMain.handle(IPC.ddosOverview, () => {
+    requireOperator();
+    return ddos.overview();
+  });
+  ipcMain.handle(IPC.ddosStatus, (_event, hostId: unknown) => {
+    requireOperator();
+    return ddos.status(str(hostId, "host id"), true);
+  });
+  ipcMain.handle(IPC.ddosInstall, (_event, hostId: unknown) => {
+    requireOperator();
+    return ddos.install(str(hostId, "host id"));
+  });
+  ipcMain.handle(IPC.ddosMode, (_event, hostId: unknown, mode: unknown) => {
+    requireOperator();
+    return ddos.setMode(str(hostId, "host id"), str(mode, "mode") as DdosMode);
+  });
+  ipcMain.handle(IPC.ddosBan, (_event, hostId: unknown, ip: unknown, seconds: unknown, reason: unknown) => {
+    requireOperator();
+    return ddos.ban(
       str(hostId, "host id"),
       str(ip, "ip"),
       typeof seconds === "number" && Number.isFinite(seconds) ? seconds : undefined,
       typeof reason === "string" ? reason : undefined,
-    ),
-  );
-  ipcMain.handle(IPC.ddosUnban, (_event, hostId: unknown, ip: unknown) =>
-    ddos.unban(str(hostId, "host id"), str(ip, "ip")),
-  );
-  ipcMain.handle(IPC.ddosAllow, (_event, hostId: unknown, ip: unknown, add: unknown) =>
-    ddos.allow(str(hostId, "host id"), str(ip, "ip"), add !== false),
-  );
-  ipcMain.handle(IPC.ddosApply, (_event, hostId: unknown, patch: unknown) =>
-    ddos.apply(str(hostId, "host id"), (patch ?? {}) as Partial<DdosConfig>),
-  );
-  ipcMain.handle(IPC.ddosJournal, (_event, limit: unknown) =>
-    ddos.journal(typeof limit === "number" ? limit : 100),
-  );
+    );
+  });
+  ipcMain.handle(IPC.ddosUnban, (_event, hostId: unknown, ip: unknown) => {
+    requireOperator();
+    return ddos.unban(str(hostId, "host id"), str(ip, "ip"));
+  });
+  ipcMain.handle(IPC.ddosAllow, (_event, hostId: unknown, ip: unknown, add: unknown) => {
+    requireOperator();
+    return ddos.allow(str(hostId, "host id"), str(ip, "ip"), add !== false);
+  });
+  ipcMain.handle(IPC.ddosApply, (_event, hostId: unknown, patch: unknown) => {
+    requireOperator();
+    return ddos.apply(str(hostId, "host id"), (patch ?? {}) as Partial<DdosConfig>);
+  });
+  ipcMain.handle(IPC.ddosJournal, (_event, limit: unknown) => {
+    requireOperator();
+    return ddos.journal(typeof limit === "number" ? limit : 100);
+  });
+
+  ipcMain.handle(IPC.relayOverview, () => {
+    requireOperator();
+    return relay.overview();
+  });
+  ipcMain.handle(IPC.relaySave, (_event, input: RelayChainInput) => {
+    requireOperator();
+    return relay.save(input);
+  });
+  ipcMain.handle(IPC.relayProbe, () => {
+    requireOperator();
+    return relay.probe();
+  });
+  ipcMain.handle(IPC.relayDeploy, () => {
+    requireOperator();
+    return relay.deploy();
+  });
+  ipcMain.handle(IPC.relayRemove, () => {
+    requireOperator();
+    return relay.remove();
+  });
+  ipcMain.handle(IPC.vncOpen, (_event, hostId: unknown, port: unknown) => {
+    const id = str(hostId, "host id");
+    guardSshHost(id);
+    return vnc.open(id, typeof port === "number" ? port : undefined);
+  });
+  ipcMain.handle(IPC.vncClose, (_event, sessionId: unknown) => vnc.close(str(sessionId, "session id")));
 
   ipcMain.handle(IPC.mcpStatus, (): McpStatus => {
     const server = mcpServerPath(app.getAppPath(), app.isPackaged);
@@ -297,7 +524,10 @@ export function registerIpc(runtime: Runtime): void {
     };
   });
 
-  ipcMain.handle(IPC.mcpWriteConfig, (_event, target: unknown) => writeMcpConfig(target));
+  ipcMain.handle(IPC.mcpWriteConfig, (_event, target: unknown) => {
+    requireOperator();
+    return writeMcpConfig(target);
+  });
 }
 
 interface McpTarget {

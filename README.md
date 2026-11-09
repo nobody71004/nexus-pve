@@ -820,7 +820,8 @@ If you discover a security issue, avoid posting live credentials, hostnames, or 
 - The edge shield is IPv4-only and protects forwarded TCP/UDP services, not arbitrary host applications.
 - There is no built-in upstream scrubbing, L7 inspection, reputation service, or multi-edge coordination.
 - The edge installer expects a root SSH login and a Debian/Ubuntu-style host for automatic `conntrack-tools` installation.
-- The UI is an operator console, not a multi-tenant control plane. There is no role-based access control inside the app.
+- The UI is an operator console, not a multi-tenant control plane. Team roles and per-machine grants are enforced locally, but they are not an SSO provider or an enterprise identity boundary.
+- The embedded noVNC console requires a VNC daemon listening on the host's loopback interface. Nexus provides the SSH-tunneled viewer; it does not install or expose a VNC daemon.
 - The project is version `1.0.0`; review changes and test against a lab before relying on it for production recovery or attack response.
 
 ---

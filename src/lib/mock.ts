@@ -16,6 +16,11 @@ import type {
   NodeStats,
   PipelineDef,
   PipelineRun,
+  RelayChain,
+  RelayChainInput,
+  RelayNodeStatus,
+  RelayOverview,
+  RelayPlan,
   RrdPoint,
   SshHostInput,
   SshHostSummary,
@@ -31,6 +36,20 @@ import type {
   SpeedTestResult,
   SshTestResult,
   TaskSummary,
+  TeamActivityEntry,
+  TeamAuditExportResult,
+  TeamAuditFilter,
+  TeamAuditResult,
+  TeamAuthState,
+  TeamBootstrapInput,
+  TeamLoginInput,
+  TeamMachine,
+  TeamOverview,
+  TeamRole,
+  TeamSyncStatus,
+  TeamUser,
+  TeamUserInput,
+  TeamUserPatch,
   VmDetail,
   VmSummary,
 } from "../../shared/types";
@@ -56,11 +75,11 @@ function mockSpeed(host: { label: string }, hostId: string, index: number): Spee
 
 const HOSTS: HostSummary[] = [
   {
-    id: "host-pve-demo",
-    label: "pve-demo",
-    baseUrl: "https://192.0.2.11:8006",
+    id: "host-lab",
+    label: "demo-lab",
+    baseUrl: "https://192.0.2.10:8006",
     authMode: "token",
-    tokenId: "automation@pve!demo",
+    tokenId: "nexus@pve!console",
     tlsVerify: false,
     color: "#38f2ff",
     hasSecret: true,
@@ -69,7 +88,7 @@ const HOSTS: HostSummary[] = [
   },
   {
     id: "host-vps",
-    label: "vps-demo",
+    label: "hel1-vps",
     baseUrl: "https://hel1.example.net:8006",
     authMode: "token",
     tokenId: "automation@pve!agent",
@@ -82,29 +101,30 @@ const HOSTS: HostSummary[] = [
 ];
 
 const NODE_FABRIC: Record<string, { nodes: string[]; cpu: number[]; mem: number[]; disks: number[] }> = {
-  "host-pve-demo": {
-    nodes: ["pve-demo-a", "pve-demo-b"],
+  "host-lab": {
+    nodes: ["pve-hyperion", "pve-helios"],
     cpu: [0.34, 0.58],
     mem: [0.61, 0.43],
     disks: [0.58, 0.31],
   },
-  "host-vps": { nodes: ["vps-node01"], cpu: [0.22], mem: [0.47], disks: [0.66] },
+  "host-vps": { nodes: ["hel1-node01"], cpu: [0.22], mem: [0.47], disks: [0.66] },
 };
 
 const VM_FABRIC: Array<Pick<VmSummary, "name" | "node" | "type" | "status" | "tags" | "cpus"> & { vmid: number }> = [
-  { vmid: 101, name: "demo-master", node: "pve-demo-a", type: "lxc", status: "running", tags: ["prod", "net"], cpus: 2 },
-  { vmid: 102, name: "demo-proxmox-1", node: "pve-demo-a", type: "lxc", status: "running", tags: ["prod", "game"], cpus: 4 },
-  { vmid: 103, name: "demo-proxmox-2", node: "pve-demo-a", type: "lxc", status: "running", tags: ["prod", "game"], cpus: 4 },
-  { vmid: 110, name: "build-runner", node: "pve-demo-a", type: "qemu", status: "running", tags: ["ci"], cpus: 8 },
-  { vmid: 120, name: "cef-hud-lab", node: "pve-demo-b", type: "qemu", status: "paused", tags: ["lab"], cpus: 4 },
-  { vmid: 121, name: "backup-vault", node: "pve-demo-b", type: "qemu", status: "running", tags: ["infra"], cpus: 2 },
-  { vmid: 130, name: "edge-proxy", node: "pve-demo-b", type: "lxc", status: "stopped", tags: ["net"], cpus: 2 },
-  { vmid: 140, name: "vps-web", node: "vps-node01", type: "qemu", status: "running", tags: ["prod"], cpus: 4 },
+  { vmid: 101, name: "game-master", node: "pve-hyperion", type: "lxc", status: "running", tags: ["prod", "net"], cpus: 2 },
+  { vmid: 102, name: "game-node-1", node: "pve-hyperion", type: "lxc", status: "running", tags: ["prod", "game"], cpus: 4 },
+  { vmid: 103, name: "game-node-2", node: "pve-hyperion", type: "lxc", status: "running", tags: ["prod", "game"], cpus: 4 },
+  { vmid: 110, name: "build-runner", node: "pve-hyperion", type: "qemu", status: "running", tags: ["ci"], cpus: 8 },
+  { vmid: 120, name: "hud-lab", node: "pve-helios", type: "qemu", status: "paused", tags: ["lab"], cpus: 4 },
+  { vmid: 121, name: "backup-vault", node: "pve-helios", type: "qemu", status: "running", tags: ["infra"], cpus: 2 },
+  { vmid: 130, name: "edge-proxy", node: "pve-helios", type: "lxc", status: "stopped", tags: ["net"], cpus: 2 },
+  { vmid: 140, name: "hel1-web", node: "hel1-node01", type: "qemu", status: "running", tags: ["prod"], cpus: 4 },
 ];
 
 const listeners = new Set<(event: NexusEvent) => void>();
 const runs = new Map<string, PipelineRun>();
 let hosts = [...HOSTS];
+let mockRelayChain: RelayChain | null = null;
 
 function emit(event: NexusEvent) {
   for (const listener of listeners) listener(event);
@@ -139,12 +159,12 @@ function makeNode(hostId: string, name: string, index: number, diskUsed: number)
   return {
     node: name,
     status: "online",
-    uptime: 86_400 * (hostId === "host-pve-demo" ? 74 + index * 3 : 41),
+    uptime: 86_400 * (hostId === "host-lab" ? 74 + index * 3 : 41),
     cpu,
-    cores: hostId === "host-pve-demo" ? 16 : 8,
+    cores: hostId === "host-lab" ? 16 : 8,
     sockets: 1,
     mhz: 2904,
-    model: hostId === "host-pve-demo" ? "AMD EPYC 7302P 16-Core Processor" : "AMD Ryzen 9 3900X 12-Core",
+    model: hostId === "host-lab" ? "AMD EPYC 7302P 16-Core Processor" : "AMD Ryzen 9 3900X 12-Core",
     kernel: "6.8.12-4-pve",
     pveVersion: "8.3.2",
     memory: { used: mem, total: memTotal, free: memTotal - mem },
@@ -195,7 +215,7 @@ function makeNode(hostId: string, name: string, index: number, diskUsed: number)
       },
     ],
     network: [
-      { iface: "vmbr0", type: "bridge", active: true, address: "192.0.2.11", cidr: "192.0.2.11/24", gateway: "192.0.2.99" },
+      { iface: "vmbr0", type: "bridge", active: true, address: "192.0.2.10", cidr: "192.0.2.10/24", gateway: "192.0.2.1" },
       { iface: "eno1", type: "eth", active: true, speed: "10000" },
     ],
     sensors: [
@@ -309,7 +329,7 @@ function makeSchedules(): ClusterBackupJob[] {
       mode: "stop",
       compress: "gzip",
       vmid: "101,102",
-      node: "pve-demo-a",
+      node: "pve-hyperion",
       comment: "Weekly cold copies",
       nextRun: undefined,
     },
@@ -319,11 +339,11 @@ function makeSchedules(): ClusterBackupJob[] {
 function makeArchives(hostId: string): BackupArchive[] {
   const node = NODE_FABRIC[hostId].nodes[0];
   return [
-    { vmid: 101, name: "demo-master" },
-    { vmid: 102, name: "demo-proxmox-1" },
+    { vmid: 101, name: "game-master" },
+    { vmid: 102, name: "game-node-1" },
     { vmid: 110, name: "build-runner" },
     { vmid: 121, name: "backup-vault" },
-    { vmid: 140, name: "vps-web" },
+    { vmid: 140, name: "hel1-web" },
   ].map((entry, index) => ({
     volid: `backup-nfs:backup/vzdump-qemu-${entry.vmid}-2026_11_0${7 - index}_02_30_00.vma.zst`,
     storage: "backup-nfs",
@@ -356,11 +376,11 @@ function snapshot(hostId: string): FleetSnapshot {
       nodeCount: nodes.length,
       vmCount: vms.length,
       checkedAt: Date.now(),
-      clusterName: host.id === "host-pve-demo" ? "pve-demo" : undefined,
+      clusterName: host.id === "host-lab" ? "demo" : undefined,
     },
     version: "8.3.2",
     release: "3f5b1d0",
-    clusterName: host.id === "host-pve-demo" ? "pve-demo" : undefined,
+    clusterName: host.id === "host-lab" ? "demo" : undefined,
     nodes,
     vms,
     tasks: makeTasks(host.id),
@@ -576,22 +596,22 @@ function mockHelperStatus(host: SshHostSummary) {
 
 let sshHosts: SshHostSummary[] = [
   {
-    id: "ssh-demo",
-    label: "demo-relay",
-    host: "192.0.2.12",
+    id: "ssh-edge",
+    label: "edge-relay",
+    host: "203.0.113.10",
     port: 22,
     username: "root",
     authMode: "key",
-    keyPath: "~/.ssh/relay-demo",
+    keyPath: "~/.ssh/edge-relay",
     hasSecret: false,
     color: "#3dffa8",
     createdAt: Date.now() - 86_400_000 * 9,
     lastSeenAt: Date.now() - 3200,
   },
   {
-    id: "ssh-vps-demo",
-    label: "vps-demo",
-    host: "192.0.2.13",
+    id: "ssh-dedicated",
+    label: "demo-dedicated",
+    host: "203.0.113.20",
     port: 22,
     username: "user",
     authMode: "password",
@@ -601,6 +621,131 @@ let sshHosts: SshHostSummary[] = [
     lastSeenAt: Date.now() - 12_000,
   },
 ];
+
+const mockTeamNow = Date.now();
+const mockAdmin: TeamUser = {
+  id: "user-admin",
+  username: "owner",
+  displayName: "Morgan Lee",
+  role: "admin",
+  status: "active",
+  createdAt: mockTeamNow - 86_400_000 * 90,
+  updatedAt: mockTeamNow - 86_400_000 * 2,
+  lastLoginAt: mockTeamNow - 120_000,
+  linkedMachines: 2,
+  online: true,
+};
+let mockUsers: TeamUser[] = [
+  mockAdmin,
+  {
+    id: "user-mod",
+    username: "riley",
+    displayName: "Riley Chen",
+    role: "moderator",
+    status: "active",
+    createdAt: mockTeamNow - 86_400_000 * 44,
+    updatedAt: mockTeamNow - 3_600_000,
+    lastLoginAt: mockTeamNow - 18 * 60_000,
+    linkedMachines: 1,
+    online: true,
+  },
+  {
+    id: "user-ops",
+    username: "sam",
+    displayName: "Sam Okafor",
+    role: "user",
+    status: "active",
+    createdAt: mockTeamNow - 86_400_000 * 12,
+    updatedAt: mockTeamNow - 86_400_000,
+    lastLoginAt: mockTeamNow - 86_400_000 * 2,
+    linkedMachines: 1,
+    online: false,
+  },
+];
+let mockMachineLinks: Record<string, string[]> = {
+  "ssh-edge": ["user-admin", "user-mod", "user-ops"],
+  "ssh-dedicated": ["user-admin", "user-mod"],
+};
+let mockTeamActivity: TeamActivityEntry[] = [
+  {
+    id: "act-1",
+    at: mockTeamNow - 7 * 60_000,
+    actorId: "user-mod",
+    actorName: "Riley Chen",
+    action: "machine.links",
+    targetType: "machine",
+    targetId: "ssh-edge",
+    targetName: "edge-relay",
+    detail: "3 members linked",
+  },
+  {
+    id: "act-2",
+    at: mockTeamNow - 42 * 60_000,
+    actorId: "user-admin",
+    actorName: "Morgan Lee",
+    action: "user.create",
+    targetType: "user",
+    targetId: "user-ops",
+    targetName: "Sam Okafor",
+    detail: "Created Member @sam",
+  },
+  {
+    id: "act-3",
+    at: mockTeamNow - 3 * 3_600_000,
+    actorId: "user-admin",
+    actorName: "Morgan Lee",
+    action: "auth.login",
+    targetType: "session",
+    targetName: "Morgan Lee",
+    detail: "Signed in",
+  },
+];
+
+function mockTeamMachines(): TeamMachine[] {
+  return sshHosts.map((host) => {
+    const linkedUserIds = mockMachineLinks[host.id] ?? [];
+    const linkedUsers = mockUsers
+      .filter((user) => linkedUserIds.includes(user.id))
+      .map(({ id, username, displayName, role }) => ({ id, username, displayName, role }));
+    return {
+      id: host.id,
+      label: host.label,
+      host: host.host,
+      port: host.port,
+      username: host.username,
+      color: host.color,
+      linkedUserIds,
+      linkedUsers,
+      source: "local",
+      updatedAt: host.createdAt,
+    };
+  });
+}
+
+function mockTeamOverview(): TeamOverview {
+  const machines = mockTeamMachines();
+  const online = mockUsers.filter((user) => user.online || user.id === "user-admin").length;
+  return {
+    workspaceName: "Nexus Operations",
+    database: "SQLite",
+    users: mockUsers.map((user) => ({ ...user, online: user.online || user.id === "user-admin" })),
+    machines,
+    activity: mockTeamActivity,
+    counts: {
+      members: mockUsers.length,
+      admins: mockUsers.filter((user) => user.role === "admin").length,
+      moderators: mockUsers.filter((user) => user.role === "moderator").length,
+      machines: machines.length,
+      links: machines.reduce((sum, machine) => sum + machine.linkedUserIds.length, 0),
+      online,
+    },
+    permissions: { manageUsers: true, manageRoles: true, deleteUsers: true, manageLinks: true, manageMachines: true },
+  };
+}
+
+function mockRole(value: TeamRole | undefined): TeamRole {
+  return value === "admin" || value === "moderator" ? value : "user";
+}
 
 function makeSshSnapshot(host: SshHostSummary): SshSnapshot {
   const seed = host.id.length % 7;
@@ -619,15 +764,15 @@ function makeSshSnapshot(host: SshHostSummary): SshSnapshot {
     host,
     status: { id: host.id, health: "online", latencyMs: 68, checkedAt: Date.now() },
     identity: {
-      hostname: host.id === "ssh-demo" ? "edge.example.com" : "ubuntu24",
+      hostname: host.id === "ssh-edge" ? "edge.example.net" : "ubuntu24",
       os: "Ubuntu 24.04.5 LTS",
       kernel: "6.17.0-35-generic",
       arch: "x86_64",
       uptime: 812_400,
     },
     cpu: {
-      model: host.id === "ssh-demo" ? "AMD EPYC-Genoa Processor" : "Intel Xeon E5-2699 v3",
-      cores: host.id === "ssh-demo" ? 2 : 32,
+      model: host.id === "ssh-edge" ? "AMD EPYC-Genoa Processor" : "Intel Xeon E5-2699 v3",
+      cores: host.id === "ssh-edge" ? 2 : 32,
       load: [0.62, 0.48, 0.4],
       usage: cpu,
       mhz: 2900,
@@ -777,24 +922,24 @@ function mockJournalEntries(): SecurityJournalEntry[] {
     {
       kind: "install",
       message: "helper install (automatic, route root): outdated → ready, ok",
-      hostId: "ssh-demo",
-      label: "demo-relay",
+      hostId: "ssh-edge",
+      label: "edge-relay",
       route: "root",
       trigger: "automatic",
     },
     {
       kind: "install",
       message: "helper install (manual, route password): missing → ready, ok",
-      hostId: "ssh-vps-demo",
-      label: "vps-demo",
+      hostId: "ssh-dedicated",
+      label: "demo-dedicated",
       route: "password",
       trigger: "manual",
     },
     {
       kind: "install",
       message: "helper install (automatic, route password): outdated → outdated, failed — sudo_password=rejected",
-      hostId: "ssh-vps-demo",
-      label: "vps-demo",
+      hostId: "ssh-dedicated",
+      label: "demo-dedicated",
       route: "password",
       trigger: "automatic",
     },
@@ -803,7 +948,7 @@ function mockJournalEntries(): SecurityJournalEntry[] {
     seq: index + 1,
     at: Date.now() - (seeds.length - index) * 240_000,
     hostId: seed.hostId ?? "ssh-ubuntu24",
-    label: seed.label ?? "ubuntu24 · pve-demo guest",
+    label: seed.label ?? "ubuntu24 · demo guest",
     ...seed,
     prev: index === 0 ? "genesis" : "0".repeat(64),
     hash: `${index + 1}`.padStart(64, "a"),
@@ -833,14 +978,14 @@ const mockDdosForwards: DdosConfig["forwards"] = [
 
 const mockDdosIncidents: DdosIncident[] = [
   { id: "ddos-1", at: Date.now() - 9 * 60_000, kind: "attack", message: "ingress spike from 203.0.113.42 (4,820 pps); limits tightened for 5 minutes" },
-  { id: "ddos-2", at: Date.now() - 8 * 60_000, kind: "ban", message: "banned 203.0.113.42 on demo-relay for 3600s", detail: "auto: 4820 pps" },
-  { id: "ddos-3", at: Date.now() - 42 * 60_000, kind: "mode", message: "mode set to defend on demo-relay" },
-  { id: "ddos-4", at: Date.now() - 26 * 60 * 60_000, kind: "install", message: "Nexus Shield installed on demo-relay", detail: "9 forwards · edge tables adopted" },
+  { id: "ddos-2", at: Date.now() - 8 * 60_000, kind: "ban", message: "banned 203.0.113.42 on edge-relay for 3600s", detail: "auto: 4820 pps" },
+  { id: "ddos-3", at: Date.now() - 42 * 60_000, kind: "mode", message: "mode set to defend on edge-relay" },
+  { id: "ddos-4", at: Date.now() - 26 * 60 * 60_000, kind: "install", message: "Nexus Shield installed on edge-relay", detail: "9 forwards · edge tables adopted" },
 ];
 
 function mockDdosStatus(): DdosStatus {
   return {
-    hostId: "ssh-demo",
+    hostId: "ssh-edge",
     installed: true,
     running: true,
     mode: mockDdosMode,
@@ -848,7 +993,7 @@ function mockDdosStatus(): DdosStatus {
     since: Date.now() - 26 * 60 * 60_000,
     sampledAt: Date.now(),
     uptimeSec: 937_000,
-    publicIp: "192.0.2.12",
+    publicIp: "203.0.113.10",
     wan: "eth0",
     ingressBps: 17_400_000 + Math.abs(jitter(1, 0.2)) * 4_000_000,
     egressBps: 9_800_000,
@@ -893,8 +1038,8 @@ function mockDdosConfig(): DdosConfig {
 
 function mockDdosOverview(): DdosOverview {
   return {
-    edgeHostId: "ssh-demo",
-    edgeLabel: "demo-relay",
+    edgeHostId: "ssh-edge",
+    edgeLabel: "edge-relay",
     candidates: sshHosts,
     config: mockDdosConfig(),
     status: mockDdosStatus(),
@@ -903,7 +1048,81 @@ function mockDdosOverview(): DdosOverview {
   };
 }
 
+function mockRelayPlan(chain: RelayChain): RelayPlan {
+  return {
+    chainId: chain.id,
+    hops: chain.nodes.map((node, index) => {
+      const role: "entry" | "relay" | "exit" = index === 0 ? "entry" : index === chain.nodes.length - 1 ? "exit" : "relay";
+      return {
+        index,
+        hostId: node.hostId,
+        label: node.label,
+        role,
+        publicHost: node.publicHost || node.label,
+        wgAddress: `10.77.0.${index + 2}`,
+        listen: role === "entry" ? `0.0.0.0:${chain.entryPort}` : `10.77.0.${index + 2}:${chain.relayPort}`,
+        forwardTo: index === chain.nodes.length - 1 ? `${chain.originHost}:${chain.originPort}` : `10.77.0.${index + 3}:${chain.relayPort}`,
+      };
+    }),
+    origin: `${chain.originHost}:${chain.originPort}`,
+    transport: chain.transport,
+    encryption: "WireGuard Noise IK · ChaCha20-Poly1305",
+    obfuscation: chain.obfuscation === "tls" ? "Opt-in TLS camouflage on the public entry" : "None",
+    warnings: [],
+  };
+}
+
+function mockRelayOverview(): RelayOverview {
+  const statuses: RelayNodeStatus[] = (mockRelayChain?.nodes ?? []).map((node) => ({
+    hostId: node.hostId,
+    health: "online",
+    latencyMs: 18,
+    wgActive: true,
+    relayActive: true,
+    peers: Math.max(0, (mockRelayChain?.nodes.length ?? 1) - 1),
+    listener: true,
+    checkedAt: Date.now(),
+  }));
+  return {
+    chain: mockRelayChain,
+    hosts: sshHosts.map((host) => ({
+      id: host.id,
+      label: host.label,
+      host: host.host,
+      port: host.port,
+      username: host.username,
+      color: host.color,
+    })),
+    statuses,
+    plan: mockRelayChain ? mockRelayPlan(mockRelayChain) : null,
+    checkedAt: Date.now(),
+  };
+}
+
 export function createMockBridge(): NexusBridge {
+  const mockSyncStatus = (): TeamSyncStatus => ({
+    enabled: false,
+    phase: "disabled",
+    workspace: "default",
+    deviceName: "Nexus desktop",
+    tokenSet: false,
+    revision: 0,
+    counts: { users: mockUsers.length, machines: sshHosts.length, activity: mockTeamActivity.length },
+  });
+  let syncStatus = mockSyncStatus();
+  const filterAudit = (filter?: TeamAuditFilter): TeamActivityEntry[] => {
+    const query = (filter?.query ?? "").trim().toLowerCase();
+    const entries = mockTeamActivity.filter((entry) => {
+      if (filter?.actorId && entry.actorId !== filter.actorId) return false;
+      if (filter?.action && entry.action !== filter.action) return false;
+      if (filter?.targetType && filter.targetType !== "all" && entry.targetType !== filter.targetType) return false;
+      if (filter?.from && entry.at < filter.from) return false;
+      if (filter?.to && entry.at > filter.to) return false;
+      if (query && !`${entry.actorName} ${entry.action} ${entry.targetName ?? ""} ${entry.detail ?? ""}`.toLowerCase().includes(query)) return false;
+      return true;
+    });
+    return entries.slice(0, filter?.limit ?? 250);
+  };
   return {
     app: {
       info: async () => ({
@@ -918,6 +1137,114 @@ export function createMockBridge(): NexusBridge {
       }),
       window: async () => undefined,
       openExternal: async () => undefined,
+    },
+    auth: {
+      status: async (): Promise<TeamAuthState> => ({ initialized: true, user: mockAdmin, expiresAt: Date.now() + 12 * 60 * 60 * 1000 }),
+      bootstrap: async (input: TeamBootstrapInput): Promise<TeamUser> => ({
+        ...mockAdmin,
+        username: input.username || mockAdmin.username,
+        displayName: input.displayName || mockAdmin.displayName,
+      }),
+      login: async (_input: TeamLoginInput) => mockAdmin,
+      logout: async () => undefined,
+      refreshSession: async (): Promise<TeamAuthState> => ({ initialized: true, user: mockAdmin, expiresAt: Date.now() + 12 * 60 * 60 * 1000 }),
+      changePassword: async () => undefined,
+    },
+    team: {
+      overview: async () => mockTeamOverview(),
+      createUser: async (input: TeamUserInput) => {
+        const user: TeamUser = {
+          id: `user-${Date.now()}`,
+          username: input.username.trim().toLowerCase(),
+          displayName: input.displayName.trim(),
+          role: mockRole(input.role),
+          status: "active",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          linkedMachines: 0,
+          online: false,
+        };
+        mockUsers = [...mockUsers, user];
+        mockTeamActivity = [
+          { id: `act-${Date.now()}`, at: Date.now(), actorId: mockAdmin.id, actorName: mockAdmin.displayName, action: "user.create", targetType: "user", targetId: user.id, targetName: user.displayName, detail: `Created ${user.role} @${user.username}` },
+          ...mockTeamActivity,
+        ];
+        return mockTeamOverview();
+      },
+      updateUser: async (id: string, patch: TeamUserPatch) => {
+        mockUsers = mockUsers.map((user) =>
+          user.id === id
+            ? {
+                ...user,
+                displayName: patch.displayName?.trim() || user.displayName,
+                role: patch.role ? mockRole(patch.role) : user.role,
+                status: patch.status ?? user.status,
+                updatedAt: Date.now(),
+              }
+            : user,
+        );
+        const target = mockUsers.find((user) => user.id === id);
+        mockTeamActivity = [
+          { id: `act-${Date.now()}`, at: Date.now(), actorId: mockAdmin.id, actorName: mockAdmin.displayName, action: "user.update", targetType: "user", targetId: id, targetName: target?.displayName, detail: "Profile updated" },
+          ...mockTeamActivity,
+        ];
+        return mockTeamOverview();
+      },
+      deleteUser: async (id: string) => {
+        const target = mockUsers.find((user) => user.id === id);
+        mockUsers = mockUsers.filter((user) => user.id !== id);
+        mockMachineLinks = Object.fromEntries(Object.entries(mockMachineLinks).map(([machine, ids]) => [machine, ids.filter((entry) => entry !== id)]));
+        if (target) {
+          mockTeamActivity = [
+            { id: `act-${Date.now()}`, at: Date.now(), actorId: mockAdmin.id, actorName: mockAdmin.displayName, action: "user.delete", targetType: "user", targetId: id, targetName: target.displayName, detail: `Removed @${target.username}` },
+            ...mockTeamActivity,
+          ];
+        }
+        return mockTeamOverview();
+      },
+      setMachineLinks: async (machineId: string, userIds: string[]) => {
+        mockMachineLinks = { ...mockMachineLinks, [machineId]: [...new Set(userIds)] };
+        const machine = mockTeamMachines().find((entry) => entry.id === machineId);
+        mockTeamActivity = [
+          { id: `act-${Date.now()}`, at: Date.now(), actorId: mockAdmin.id, actorName: mockAdmin.displayName, action: "machine.links", targetType: "machine", targetId: machineId, targetName: machine?.label, detail: `${userIds.length} member${userIds.length === 1 ? "" : "s"} linked` },
+          ...mockTeamActivity,
+        ];
+        return mockTeamOverview();
+      },
+      audit: async (filter?: TeamAuditFilter): Promise<TeamAuditResult> => {
+        const entries = filterAudit(filter);
+        return { entries, total: filter?.query || filter?.action || filter?.actorId || (filter?.targetType && filter.targetType !== "all") ? entries.length : mockTeamActivity.length };
+      },
+      exportAudit: async (filter?: TeamAuditFilter): Promise<TeamAuditExportResult> => {
+        const entries = filterAudit(filter);
+        return { count: entries.length, filename: `nexus-team-audit-${new Date().toISOString().slice(0, 10)}.csv`, path: "/mock/nexus-team-audit.csv" };
+      },
+    },
+    teamSync: {
+      status: async () => syncStatus,
+      configure: async (input) => {
+        syncStatus = {
+          ...mockSyncStatus(),
+          enabled: true,
+          phase: "online",
+          endpoint: input.endpoint,
+          workspace: input.workspace || "default",
+          deviceName: input.deviceName || "Nexus desktop",
+          tokenSet: true,
+          revision: 1,
+          lastSyncAt: Date.now(),
+          lastAttemptAt: Date.now(),
+        };
+        return { status: syncStatus, pulled: 0, pushed: 1, changed: true };
+      },
+      now: async () => {
+        syncStatus = { ...syncStatus, enabled: true, phase: "online", revision: syncStatus.revision + 1, lastSyncAt: Date.now(), lastAttemptAt: Date.now() };
+        return { status: syncStatus, pulled: 0, pushed: 0, changed: false };
+      },
+      disable: async () => {
+        syncStatus = mockSyncStatus();
+        return syncStatus;
+      },
     },
     hosts: {
       list: async () => hosts,
@@ -949,8 +1276,8 @@ export function createMockBridge(): NexusBridge {
           latencyMs: 84,
           version: "8.3.2",
           release: "3f5b1d0",
-          clusterName: "pve-demo",
-          nodes: ["pve-demo-a", "pve-demo-b"],
+          clusterName: "demo",
+          nodes: ["pve-hyperion", "pve-helios"],
           tlsFingerprint: "B4:2E:19:AA:0C:71:8D:33:5F:2C:91:DE:44:18:7A:C0",
         };
       },
@@ -1181,12 +1508,12 @@ export function createMockBridge(): NexusBridge {
       }),
       setMode: async (_hostId: string, mode: DdosMode) => {
         mockDdosMode = mode;
-        mockDdosIncidents.unshift({ id: `ddos-${Date.now()}`, at: Date.now(), kind: "mode", message: `mode set to ${mode} on demo-relay` });
+        mockDdosIncidents.unshift({ id: `ddos-${Date.now()}`, at: Date.now(), kind: "mode", message: `mode set to ${mode} on edge-relay` });
         return mockDdosStatus();
       },
       ban: async (_hostId: string, ip: string) => {
         mockDdosBlocked = [...new Set([...mockDdosBlocked, ip])];
-        mockDdosIncidents.unshift({ id: `ddos-${Date.now()}`, at: Date.now(), kind: "ban", message: `banned ${ip} on demo-relay for 3600s` });
+        mockDdosIncidents.unshift({ id: `ddos-${Date.now()}`, at: Date.now(), kind: "ban", message: `banned ${ip} on edge-relay for 3600s` });
         return mockDdosStatus();
       },
       unban: async (_hostId: string, ip: string) => {
@@ -1203,6 +1530,68 @@ export function createMockBridge(): NexusBridge {
         return mockDdosStatus();
       },
       journal: async () => mockDdosIncidents,
+    },
+    relay: {
+      overview: async () => mockRelayOverview(),
+      save: async (input: RelayChainInput) => {
+        const now = Date.now();
+        const nodes = input.nodes.map((node) => {
+          const host = sshHosts.find((entry) => entry.id === node.hostId);
+          if (!host) throw new Error(`Unknown host ${node.hostId}`);
+          return {
+            ...node,
+            label: node.label || host.label,
+            publicHost: node.publicHost || host.host,
+          };
+        });
+        mockRelayChain = {
+          id: input.id ?? mockRelayChain?.id ?? `relay-${now}`,
+          name: input.name || "Mock relay",
+          nodes,
+          originHost: input.originHost || "127.0.0.1",
+          originPort: input.originPort || 25565,
+          entryPort: input.entryPort || 7443,
+          relayPort: input.relayPort || 7444,
+          mtu: input.mtu || 1420,
+          transport: "wireguard",
+          obfuscation: input.obfuscation === "tls" ? "tls" : "none",
+          createdAt: mockRelayChain?.createdAt ?? now,
+          updatedAt: now,
+        };
+        return mockRelayChain;
+      },
+      probe: async () => mockRelayOverview(),
+      deploy: async () => {
+        if (!mockRelayChain) throw new Error("No relay chain saved");
+        return {
+          ok: true,
+          chain: mockRelayChain,
+          outputs: mockRelayChain.nodes.map((node) => ({
+            hostId: node.hostId,
+            label: node.label,
+            ok: true,
+            output: "NEXUS_RELAY_OK (mock)",
+          })),
+        };
+      },
+      remove: async () => ({
+        ok: true,
+        outputs: (mockRelayChain?.nodes ?? []).map((node) => ({
+          hostId: node.hostId,
+          label: node.label,
+          ok: true,
+          output: "NEXUS_RELAY_REMOVED (mock)",
+        })),
+      }),
+    },
+    vnc: {
+      open: async (hostId: string) => ({
+        id: `vnc-${Date.now()}`,
+        hostId,
+        wsUrl: "ws://127.0.0.1:5999/mock",
+        expiresAt: Date.now() + 60_000,
+      }),
+      close: async () => undefined,
     },
     mcp: {
       status: async () => ({

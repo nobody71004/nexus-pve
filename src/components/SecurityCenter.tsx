@@ -170,6 +170,30 @@ export function SecurityCenter({
     }
   };
 
+  const installResidentOnAll = async () => {
+    if (!overview || overview.hosts.length === 0) return;
+    if (!window.confirm(`Install and activate the resident enforcer on all ${overview.hosts.length} Linux hosts?`)) return;
+    setBusy("fleet-resident");
+    try {
+      const results = await Promise.allSettled(
+        overview.hosts.map((entry) => bridge.security.resident(entry.hostId, true)),
+      );
+      const active = results.filter((result) => result.status === "fulfilled" && result.value.active).length;
+      const failed = results.filter((result) => result.status === "rejected").length;
+      const firstError = results.find((result) => result.status === "rejected") as PromiseRejectedResult | undefined;
+      onToast(
+        active === overview.hosts.length ? "ok" : "warn",
+        active === overview.hosts.length ? "Resident bots active fleet-wide" : "Resident bot rollout incomplete",
+        `${active}/${overview.hosts.length} active${failed ? ` · ${failed} failed` : ""}${firstError ? ` · ${String(firstError.reason).slice(0, 100)}` : ""}`,
+      );
+      await load();
+    } catch (err) {
+      onToast("error", "Fleet resident install failed", err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const acceptBaseline = async () => {
     if (!host) return;
     setBusy("baseline");
@@ -315,6 +339,18 @@ export function SecurityCenter({
               </div>
             </button>
           </div>
+        </div>
+        <div className="action-row guard-fleet-action">
+          <button
+            className="btn small ghost"
+            onClick={() => void installResidentOnAll()}
+            disabled={busy !== null || overview.hosts.length === 0}
+            title="Install the root-owned resident timer on every configured Linux host"
+          >
+            <Icon name="shield" size={13} className={busy === "fleet-resident" ? "spin" : ""} />
+            {busy === "fleet-resident" ? "Rolling out resident bots…" : `Enable resident bot on all ${overview.hosts.length} hosts`}
+          </button>
+          <span className="hint">Each host gets the same systemd timer that enforces the selected policy locally, even when Nexus is closed.</span>
         </div>
       </Panel>
 

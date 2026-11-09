@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install or upgrade Nexus Shield on the demo edge host.
+# Install or upgrade Nexus Shield on a relay edge host.
 #
 # Run as root from a directory containing:
 #   nexus-shieldd.py  nexus-shieldctl  nexus-shield.service

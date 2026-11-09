@@ -414,7 +414,7 @@ export function ConnectPanel({
                 <input
                   value={editing.label}
                   onChange={(event) => patch({ label: event.target.value })}
-                  placeholder="pve-demo"
+                  placeholder="demo-lab"
                 />
               </label>
               <label className="field">
@@ -422,7 +422,7 @@ export function ConnectPanel({
                 <input
                   value={editing.baseUrl}
                   onChange={(event) => patch({ baseUrl: event.target.value })}
-                  placeholder="192.0.2.11"
+                  placeholder="192.0.2.10"
                 />
                 <em className="hint">https:// is assumed; port 8006 is added when omitted.</em>
               </label>
@@ -452,7 +452,7 @@ export function ConnectPanel({
                     <input
                       value={editing.tokenId ?? ""}
                       onChange={(event) => patch({ tokenId: event.target.value })}
-                      placeholder="automation@pve!demo"
+                      placeholder="nexus@pve!console"
                     />
                   </label>
                   <label className="field">
@@ -547,7 +547,7 @@ export function ConnectPanel({
                 <input
                   value={sshEditing.label}
                   onChange={(event) => patchSsh({ label: event.target.value })}
-                  placeholder="vps-demo"
+                  placeholder="demo-dedicated"
                   autoFocus
                 />
               </label>
@@ -556,7 +556,7 @@ export function ConnectPanel({
                 <input
                   value={sshEditing.host}
                   onChange={(event) => patchSsh({ host: event.target.value })}
-                  placeholder="192.0.2.13"
+                  placeholder="203.0.113.20"
                 />
               </label>
               <label className="field">
