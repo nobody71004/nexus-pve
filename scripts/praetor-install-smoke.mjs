@@ -1,22 +1,26 @@
 /**
  * MCP integration test: confirmed PRAETOR fleet install.
  *
- * The test owns a disposable Ubuntu systemd container with OpenSSH. It seeds a
- * temporary Nexus home with one password-auth host, starts the real compiled MCP
- * server, and calls praetor.install_all twice:
+ * The test owns two disposable Ubuntu systemd containers with OpenSSH. It seeds
+ * a temporary Nexus home with two password-auth hosts, starts the real compiled
+ * MCP server, and calls praetor.install_all twice:
  *
- *   1. without confirm -> the MCP gate must refuse and leave the host untouched;
- *   2. with confirm    -> the real SSH installer must install PRAETOR, start the
- *                         egress unit, write four profiles and return ready.
+ *   1. without confirm -> the MCP gate must refuse and leave both hosts untouched;
+ *   2. with confirm    -> the real SSH installer must install PRAETOR on both,
+ *                         start each egress unit, write four profiles per host,
+ *                         and return ready with a distinct key per host.
  *
- * The fixture is destroyed in finally. No live host, desktop profile or real
- * credential is touched. Docker is required; the test skips when it is missing
- * unless PRAETOR_TEST_REQUIRE_DOCKER=1 is set.
+ * Each container publishes its own TCP 9443 on a loopback alias so the external
+ * probe can verify both fleet members read as ready. The fixture is destroyed
+ * in finally. No live host, desktop profile or real credential is touched.
+ * Docker is required; the test skips when it is missing unless
+ * PRAETOR_TEST_REQUIRE_DOCKER=1 is set. If the socket is denied or the daemon
+ * is stopped, the preflight prints the exact commands that restore access.
  */
 import { spawn, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "ssh2";
@@ -34,7 +38,7 @@ const check = (name, ok, detail = "") => {
 };
 
 const state = {
-  container: "",
+  containers: [],
   image: "",
   fixtureDir: "",
   home: "",
@@ -65,10 +69,50 @@ function docker(args, options = {}) {
   return (result.stdout ?? "").trim();
 }
 
-function dockerInfo() {
+function dockerPreflight() {
   const result = run("docker", ["info", "--format", "{{.OSType}}"], { timeoutMs: 15_000 });
-  if (result.error || result.status !== 0) return null;
-  return (result.stdout ?? "").trim();
+  if (result.error) {
+    return { kind: result.error.code === "ENOENT" ? "missing" : "error" };
+  }
+  if (result.status === 0) return { kind: "ok", ostype: (result.stdout ?? "").trim() };
+  const detail = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
+  if (/permission denied/i.test(detail) && /(docker\.sock|docker API|docker daemon socket|unix:\/\/)/i.test(detail)) {
+    return { kind: "permission", user: currentUser() };
+  }
+  if (
+    /(cannot connect to the docker daemon|failed to connect to the docker (daemon|api)|is the docker daemon running)/i.test(detail) ||
+    (/(docker\.sock|unix:\/\/)/i.test(detail) && /(no such file or directory|connection refused)/i.test(detail))
+  ) {
+    return { kind: "stopped" };
+  }
+  return { kind: "error" };
+}
+
+function currentUser() {
+  try {
+    return userInfo().username || "your-user";
+  } catch {
+    return "your-user";
+  }
+}
+
+function dockerDaemonMessage() {
+  return [
+    "Docker daemon is not running; the PRAETOR test needs a running Linux Docker daemon.",
+    "Fix: sudo systemctl start docker",
+    "Verify: systemctl is-active docker",
+    "        docker info --format '{{.OSType}}'",
+  ].join("\n");
+}
+
+function dockerPermissionMessage(user) {
+  const shellUser = /^[A-Za-z0-9._-]+$/.test(user) ? user : "<your-user>";
+  return [
+    `Docker socket access denied for user "${user}"; the PRAETOR test needs disposable Linux SSH containers.`,
+    `Fix: sudo usermod -aG docker ${shellUser}`,
+    "Then sign out and back in (or run: newgrp docker) and retry.",
+    "Verify: docker info --format '{{.OSType}}'",
+  ].join("\n");
 }
 
 function sleepSync(ms) {
@@ -93,30 +137,27 @@ function encryptSecret(plain, key) {
   return `v1.${iv.toString("base64")}.${cipher.getAuthTag().toString("base64")}.${data.toString("base64")}`;
 }
 
-function seedHome(port, password) {
+function seedHome(hosts) {
   const home = mkdtempSync(path.join(tmpdir(), "nexus-praetor-smoke-"));
   const keyDir = path.join(home, "keys");
   mkdirSync(keyDir, { recursive: true, mode: 0o700 });
   const key = crypto.randomBytes(32);
   writeFileSync(path.join(keyDir, "master.key"), key, { mode: 0o600 });
-  const hostId = "praetor-smoke-host";
   const config = {
     version: 1,
     hosts: [],
-    sshHosts: [
-      {
-        id: hostId,
-        label: "praetor-smoke",
-        host: "127.0.0.1",
-        port,
-        username: "root",
-        authMode: "password",
-        hasSecret: true,
-        color: "#38f2ff",
-        createdAt: Date.now(),
-        secretEnc: encryptSecret(password, key),
-      },
-    ],
+    sshHosts: hosts.map((host, index) => ({
+      id: host.id,
+      label: host.label,
+      host: host.bind,
+      port: host.sshPort,
+      username: "root",
+      authMode: "password",
+      hasSecret: true,
+      color: host.color,
+      createdAt: Date.now() + index,
+      secretEnc: encryptSecret(host.password, key),
+    })),
     settings: { pollMs: 8000, accent: "cyan", reduceMotion: false, confirmDestructive: true },
   };
   const configPath = path.join(home, "config.json");
@@ -127,7 +168,7 @@ function seedHome(port, password) {
   writeFileSync(path.join(home, "security", "policy.json"), JSON.stringify({ policy: { enabled: false } }, null, 2), {
     mode: 0o600,
   });
-  return { home, hostId, configPath };
+  return { home, configPath };
 }
 
 function buildFixture() {
@@ -159,9 +200,9 @@ CMD ["/sbin/init"]
   return image;
 }
 
-function startContainer(image) {
-  const name = `nexus-praetor-smoke-${process.pid}-${Date.now()}`;
-  state.container = name;
+function startContainer(image, fixture) {
+  const name = `nexus-praetor-smoke-${fixture.id}-${process.pid}-${Date.now()}`;
+  state.containers.push(name);
   docker(
     [
       "run",
@@ -179,7 +220,9 @@ function startContainer(image) {
       "-v",
       "/sys/fs/cgroup:/sys/fs/cgroup:rw",
       "-p",
-      "127.0.0.1::22",
+      `${fixture.bind}::22`,
+      "-p",
+      `${fixture.bind}:9443:9443`,
       image,
     ],
     { timeoutMs: 60_000 },
@@ -187,34 +230,34 @@ function startContainer(image) {
   return name;
 }
 
-function waitForSystemd() {
+function waitForSystemd(container) {
   let last = "";
   for (let attempt = 0; attempt < 90; attempt += 1) {
-    const result = run("docker", ["exec", state.container, "systemctl", "is-system-running"], {
+    const result = run("docker", ["exec", container, "systemctl", "is-system-running"], {
       timeoutMs: 5_000,
     });
     last = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
     if (/^(running|degraded)$/m.test(last)) return last;
     sleepSync(1_000);
   }
-  throw new Error(`systemd did not become ready in the fixture\n${last.slice(-1000)}`);
+  throw new Error(`systemd did not become ready in ${container}\n${last.slice(-1000)}`);
 }
 
-function waitForPort() {
+function waitForPort(container) {
   let last = "";
   for (let attempt = 0; attempt < 40; attempt += 1) {
-    const result = run("docker", ["port", state.container, "22/tcp"], { timeoutMs: 5_000 });
+    const result = run("docker", ["port", container, "22/tcp"], { timeoutMs: 5_000 });
     last = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
     const portText = last.trim().split(":").pop()?.trim();
     const port = Number(portText);
     if (portText && Number.isInteger(port) && port > 0) return port;
     sleepSync(500);
   }
-  throw new Error(`SSH port was not published by the fixture\n${last}`);
+  throw new Error(`SSH port was not published by ${container}\n${last}`);
 }
 
-function startSsh(port, password) {
-  const passwordResult = run("docker", ["exec", "-i", state.container, "chpasswd"], {
+function startSsh(container, password) {
+  const passwordResult = run("docker", ["exec", "-i", container, "chpasswd"], {
     input: `root:${password}\n`,
     timeoutMs: 15_000,
   });
@@ -223,22 +266,21 @@ function startSsh(port, password) {
     throw new Error(`could not set the fixture root password\n${passwordResult.stderr ?? ""}`);
   }
 
-  const started = run("docker", ["exec", state.container, "systemctl", "start", "ssh.service"], {
+  const started = run("docker", ["exec", container, "systemctl", "start", "ssh.service"], {
     timeoutMs: 30_000,
   });
   if (started.status !== 0) {
     throw new Error(`fixture ssh.service did not start\n${started.stdout ?? ""}\n${started.stderr ?? ""}`);
   }
 
-  const sshd = run("docker", ["exec", state.container, "sshd", "-T"], { timeoutMs: 15_000 });
+  const sshd = run("docker", ["exec", container, "sshd", "-T"], { timeoutMs: 15_000 });
   const effective = `${sshd.stdout ?? ""}\n${sshd.stderr ?? ""}`;
   if (sshd.status !== 0 || !/^permitrootlogin yes$/m.test(effective) || !/^passwordauthentication yes$/m.test(effective)) {
     throw new Error(`fixture sshd did not expose password root login\n${effective.slice(-1500)}`);
   }
-  return port;
 }
 
-async function waitForSsh(port, password) {
+async function waitForSsh(host, port, password) {
   const deadline = Date.now() + 60_000;
   let lastError = "";
   while (Date.now() < deadline) {
@@ -257,7 +299,7 @@ async function waitForSsh(port, password) {
       };
       conn.on("ready", () => finish(true));
       conn.on("error", (error) => finish(false, error.message));
-      conn.connect({ host: "127.0.0.1", port, username: "root", password, readyTimeout: 4_000 });
+      conn.connect({ host, port, username: "root", password, readyTimeout: 4_000 });
       setTimeout(() => finish(false, "ready timeout"), 5_000);
     });
     if (result.ok) return;
@@ -373,8 +415,10 @@ function stopMcp() {
 
 function cleanup() {
   stopMcp();
-  if (state.container && !keepFixture) {
-    run("docker", ["rm", "-f", state.container], { timeoutMs: 30_000 });
+  if (!keepFixture) {
+    for (const container of state.containers) {
+      run("docker", ["rm", "-f", container], { timeoutMs: 30_000 });
+    }
   }
   if (state.image && !keepFixture) {
     run("docker", ["rmi", "-f", state.image], { timeoutMs: 30_000 });
@@ -382,26 +426,49 @@ function cleanup() {
   if (state.home && !keepFixture) rmSync(state.home, { recursive: true, force: true });
   if (state.fixtureDir) rmSync(state.fixtureDir, { recursive: true, force: true });
   if (keepFixture) {
-    console.log(`KEEP  container=${state.container || "(none)"} home=${state.home || "(none)"} image=${state.image || "(none)"}`);
+    console.log(
+      `KEEP  containers=${state.containers.join(",") || "(none)"} home=${state.home || "(none)"} image=${state.image || "(none)"}`,
+    );
   }
 }
 
 function fixtureLogs() {
-  if (!state.container) return;
-  const logs = run("docker", ["logs", "--tail", "80", state.container], { timeoutMs: 20_000 });
-  const text = `${logs.stdout ?? ""}\n${logs.stderr ?? ""}`.trim();
-  if (text) {
-    console.log("\n--- disposable host logs ---");
-    console.log(text.split("\n").slice(-80).join("\n"));
+  for (const container of state.containers) {
+    const logs = run("docker", ["logs", "--tail", "80", container], { timeoutMs: 20_000 });
+    const text = `${logs.stdout ?? ""}\n${logs.stderr ?? ""}`.trim();
+    if (text) {
+      console.log(`\n--- disposable host logs: ${container} ---`);
+      console.log(text.split("\n").slice(-80).join("\n"));
+    }
   }
 }
 
-const dockerType = dockerInfo();
-if (!dockerType) {
-  skipOrFail("Docker is not available; the PRAETOR install integration test needs a disposable Linux SSH container.");
+function containerFile(container, file) {
+  const result = run("docker", ["exec", container, "cat", file], { timeoutMs: 10_000 });
+  return { ok: result.status === 0, text: (result.stdout ?? "").trim(), error: (result.stderr ?? "").trim() };
 }
-if (dockerType !== "linux") {
-  skipOrFail(`Docker is using ${dockerType} containers; the PRAETOR fixture needs Linux containers.`);
+
+function parseContainerJson(container, file) {
+  const result = containerFile(container, file);
+  try {
+    return { ok: result.ok, json: JSON.parse(result.text), error: result.error };
+  } catch (error) {
+    return { ok: false, json: null, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+const dockerStatus = dockerPreflight();
+if (dockerStatus.kind === "permission") {
+  skipOrFail(dockerPermissionMessage(dockerStatus.user));
+}
+if (dockerStatus.kind === "stopped") {
+  skipOrFail(dockerDaemonMessage());
+}
+if (dockerStatus.kind !== "ok") {
+  skipOrFail("Docker is not available; the PRAETOR install integration test needs disposable Linux SSH containers.");
+}
+if (dockerStatus.ostype !== "linux") {
+  skipOrFail(`Docker is using ${dockerStatus.ostype} containers; the PRAETOR fixture needs Linux containers.`);
 }
 if (!existsSync(serverPath)) {
   console.error(`FAIL  MCP server bundle is missing: ${serverPath}. Run npm run build:main first.`);
@@ -410,19 +477,38 @@ if (!existsSync(serverPath)) {
 
 try {
   const image = buildFixture();
-  startContainer(image);
-  const systemd = waitForSystemd();
-  check("disposable Ubuntu fixture reaches systemd", /^(running|degraded)$/m.test(systemd), systemd);
-  const port = waitForPort();
-  const password = crypto.randomBytes(18).toString("base64url");
-  startSsh(port, password);
-  await waitForSsh(port, password);
-  check("disposable SSH host accepts the seeded root login", true, `127.0.0.1:${port}`);
+  const fixtures = [
+    { id: "praetor-smoke-a", label: "praetor-smoke-a", bind: "127.0.0.1", color: "#38f2ff" },
+    { id: "praetor-smoke-b", label: "praetor-smoke-b", bind: "127.0.0.2", color: "#7c5cff" },
+  ];
+  for (const fixture of fixtures) {
+    fixture.password = crypto.randomBytes(18).toString("base64url");
+    fixture.container = startContainer(image, fixture);
+  }
+  for (const fixture of fixtures) {
+    fixture.systemd = waitForSystemd(fixture.container);
+    fixture.sshPort = waitForPort(fixture.container);
+    startSsh(fixture.container, fixture.password);
+    await waitForSsh(fixture.bind, fixture.sshPort, fixture.password);
+  }
+  check(
+    "two disposable Ubuntu fixtures reach systemd",
+    fixtures.every((fixture) => /^(running|degraded)$/m.test(fixture.systemd)),
+    fixtures.map((fixture) => `${fixture.id}:${fixture.systemd}`).join(" / "),
+  );
+  check(
+    "both disposable SSH hosts accept the seeded root logins",
+    true,
+    fixtures.map((fixture) => `${fixture.bind}:${fixture.sshPort}`).join(", "),
+  );
 
-  const seeded = seedHome(port, password);
+  const seeded = seedHome(fixtures);
   state.home = seeded.home;
   const configText = readFileSync(seeded.configPath, "utf8");
-  check("seeded SSH password is encrypted at rest", !configText.includes(password));
+  check(
+    "both seeded SSH passwords are encrypted at rest",
+    fixtures.every((fixture) => !configText.includes(fixture.password)),
+  );
   check("MCP server bundle is present", existsSync(serverPath), path.relative(root, serverPath));
 
   startMcp(seeded.home);
@@ -435,12 +521,15 @@ try {
 
   const tools = await state.rpc("tools/list", {});
   const names = (tools?.tools ?? []).map((tool) => tool.name);
-  check("MCP exposes the PRAETOR fleet tools", names.includes("praetor.overview") && names.includes("praetor.install_all"));
+  check(
+    "MCP exposes the PRAETOR fleet tools",
+    ["praetor.overview", "praetor.install_all", "praetor.rotate"].every((name) => names.includes(name)),
+  );
 
   const plan = await state.call("praetor.plan");
   check(
-    "fleet plan sees exactly one disposable host",
-    plan.isError === false && plan.json?.totalHosts === 1 && plan.json?.pending?.length === 1,
+    "fleet plan sees both disposable hosts",
+    plan.isError === false && plan.json?.totalHosts === 2 && plan.json?.pending?.length === 2,
     `${plan.json?.totalHosts} hosts / ${plan.json?.pending?.length} pending`,
   );
 
@@ -450,67 +539,184 @@ try {
     refused.isError === true && /confirm/i.test(refused.json?.error ?? refused.text),
     refused.json?.error ?? refused.text.slice(0, 200),
   );
-  const untouched = run("docker", ["exec", state.container, "sh", "-c", "test ! -e /opt/praetor-egress"], {
-    timeoutMs: 10_000,
-  });
-  check("refused install leaves the host untouched", untouched.status === 0);
+  const untouched = fixtures.map((fixture) =>
+    run("docker", ["exec", fixture.container, "sh", "-c", "test ! -e /opt/praetor-egress"], {
+      timeoutMs: 10_000,
+    }),
+  );
+  check("refused install leaves both hosts untouched", untouched.every((result) => result.status === 0));
+  const refusedProfiles = await state.call("praetor.profiles");
+  check("refused fleet install writes no local pins", refusedProfiles.json?.count === 0);
 
-  const installed = await state.call("praetor.install_all", { confirm: true }, 600_000);
-  const result = installed.json?.results?.[0];
+  const installed = await state.call("praetor.install_all", { confirm: true }, 900_000);
+  const results = installed.json?.results ?? [];
+  const resultByHost = new Map(results.map((result) => [result.hostId, result]));
   check(
-    "confirmed fleet install succeeds",
+    "confirmed two-host fleet install succeeds",
     installed.isError === false &&
       installed.json?.ok === true &&
-      installed.json?.total === 1 &&
-      installed.json?.installed === 1 &&
+      installed.json?.total === 2 &&
+      installed.json?.installed === 2 &&
       installed.json?.failed === 0,
     installed.isError ? installed.text.slice(-800) : `${installed.json?.installed}/${installed.json?.total} installed`,
   );
   check(
-    "confirmed result is ready with four profiles",
-    result?.ok === true && result?.state === "ready" && result?.profileCount === 4 && Boolean(result?.publicKey),
-    result?.error ?? `${result?.state} / ${result?.profileCount} profiles / route ${result?.route}`,
+    "both hosts return ready with four profiles and distinct keys",
+    results.length === 2 &&
+      fixtures.every((fixture) => resultByHost.has(fixture.id)) &&
+      results.every((result) => result.ok === true && result.state === "ready" && result.profileCount === 4 && Boolean(result.publicKey)) &&
+      new Set(results.map((result) => result.publicKey)).size === 2,
+    results.map((result) => `${result.label}:${result.publicKey?.slice(0, 10)}…`).join(" / "),
+  );
+
+  const privateKeyHashes = fixtures.map((fixture) => {
+    const digest = run("docker", ["exec", fixture.container, "sha256sum", "/opt/praetor-egress/server.key"], {
+      timeoutMs: 10_000,
+    });
+    return digest.status === 0 ? digest.stdout.trim().split(/\s+/)[0] : "";
+  });
+  check(
+    "each host generated a distinct private key",
+    privateKeyHashes.every(Boolean) && new Set(privateKeyHashes).size === 2,
+  );
+
+  for (const fixture of fixtures) {
+    const result = resultByHost.get(fixture.id);
+    const remotePub = containerFile(fixture.container, "/opt/praetor-egress/server.pub");
+    check(
+      `host ${fixture.label} serves its own public key`,
+      remotePub.ok && remotePub.text === result?.publicKey,
+      `${remotePub.text.slice(0, 10)}…`,
+    );
+
+    const remotePins = parseContainerJson(fixture.container, "/opt/praetor-egress/profiles.json");
+    check(
+      `host ${fixture.label} pins four profiles to that key`,
+      remotePins.ok &&
+        Array.isArray(remotePins.json) &&
+        remotePins.json.length === 4 &&
+        remotePins.json.every((profile) => profile.serverPublicKey === result?.publicKey),
+      `${Array.isArray(remotePins.json) ? remotePins.json.length : 0} profiles`,
+    );
+
+    const keyMode = run("docker", ["exec", fixture.container, "stat", "-c", "%a", "/opt/praetor-egress/server.key"], {
+      timeoutMs: 10_000,
+    });
+    check(
+      `host ${fixture.label} private key is mode 0600`,
+      keyMode.status === 0 && keyMode.stdout.trim() === "600",
+      keyMode.stdout.trim(),
+    );
+
+    const active = run("docker", ["exec", fixture.container, "systemctl", "is-active", "praetor-egress.service"], {
+      timeoutMs: 15_000,
+    });
+    check(
+      `host ${fixture.label} egress is active`,
+      active.status === 0 && active.stdout.trim() === "active",
+      active.stdout.trim(),
+    );
+
+    const listening = run("docker", ["exec", fixture.container, "sh", "-c", "ss -lnt 2>/dev/null | grep -q ':9443 '"], {
+      timeoutMs: 10_000,
+    });
+    check(`host ${fixture.label} listens on TCP 9443`, listening.status === 0);
+  }
+
+  const localPath = path.join(seeded.home, "praetor", "profiles.json");
+  const localStore = JSON.parse(readFileSync(localPath, "utf8"));
+  const localHosts = localStore.hosts ?? {};
+  check(
+    "local store keeps four pins per host with matching keys",
+    fixtures.every((fixture) => {
+      const entry = localHosts[fixture.id];
+      const expected = resultByHost.get(fixture.id)?.publicKey;
+      return (
+        entry?.publicKey === expected &&
+        entry.profiles?.length === 4 &&
+        entry.profiles.every((profile) => profile.serverPublicKey === expected)
+      );
+    }),
+    fixtures.map((fixture) => `${fixture.id}:${localHosts[fixture.id]?.profiles?.length ?? 0}`).join(" / "),
+  );
+  check(
+    "local pins keep the two host keys separate",
+    new Set(fixtures.map((fixture) => localHosts[fixture.id]?.publicKey)).size === 2,
   );
 
   const overview = await state.call("praetor.overview");
-  const host = overview.json?.hosts?.[0];
+  const overviewHosts = overview.json?.hosts ?? [];
+  const overviewByHost = new Map(overviewHosts.map((host) => [host.hostId, host]));
   check(
-    "fleet status reports the installed egress as ready",
+    "fleet status reports both hosts ready with per-host pins",
     overview.isError === false &&
-      host?.state === "ready" &&
-      host?.profilesOnHost === true &&
-      host?.profiles?.length === 4 &&
-      host?.installedSha === overview.json?.expectedSha,
-    `${host?.state} / SHA ${host?.installedSha?.slice(0, 12)}… / ${host?.profiles?.length} profiles`,
+      overviewHosts.length === 2 &&
+      fixtures.every((fixture) => {
+        const host = overviewByHost.get(fixture.id);
+        const expected = resultByHost.get(fixture.id)?.publicKey;
+        return (
+          host?.state === "ready" &&
+          host.profilesOnHost === true &&
+          host.profiles?.length === 4 &&
+          host.installedSha === overview.json?.expectedSha &&
+          host.publicKey === expected &&
+          host.profiles.every((profile) => profile.serverPublicKey === expected)
+        );
+      }),
+    overviewHosts.map((host) => `${host.label}:${host.state}`).join(" / "),
   );
-  check("fleet status reports the installed Node and public key", Boolean(host?.nodeVersion) && host?.publicKey === result?.publicKey);
+  check(
+    "fleet status keeps a TCP and firewall check per host",
+    fixtures.every((fixture) => {
+      const history = overviewByHost.get(fixture.id)?.history ?? [];
+      const last = history.at(-1);
+      return history.length >= 1 && last?.tcpReachable === true && last?.firewallBlocked === false;
+    }),
+    fixtures.map((fixture) => `${fixture.id}:${overviewByHost.get(fixture.id)?.history?.length ?? 0}`).join(" / "),
+  );
   check("fleet status does not expose private key material", !/PRIVATE KEY/.test(overview.text));
 
   const profiles = await state.call("praetor.profiles");
-  check("profile export returns four PRAETOR Command profiles", profiles.isError === false && profiles.json?.count === 4, `${profiles.json?.count} profiles`);
+  check(
+    "profile export returns eight pins across two keys",
+    profiles.isError === false &&
+      profiles.json?.count === 8 &&
+      new Set((profiles.json?.profiles ?? []).map((profile) => profile.serverPublicKey)).size === 2,
+    `${profiles.json?.count} profiles`,
+  );
 
-  const active = run("docker", ["exec", state.container, "systemctl", "is-active", "praetor-egress.service"], {
-    timeoutMs: 15_000,
-  });
-  check("egress systemd unit is active", active.status === 0 && active.stdout.trim() === "active", active.stdout.trim());
-
-  const listening = run("docker", ["exec", state.container, "sh", "-c", "ss -lnt 2>/dev/null | grep -q ':9443 '"], {
-    timeoutMs: 10_000,
-  });
-  check("egress is listening on TCP 9443", listening.status === 0);
-
-  const keyMode = run("docker", ["exec", state.container, "stat", "-c", "%a", "/opt/praetor-egress/server.key"], {
-    timeoutMs: 10_000,
-  });
-  check("private egress key is mode 0600", keyMode.status === 0 && keyMode.stdout.trim() === "600", keyMode.stdout.trim());
+  const scoped = [];
+  for (const fixture of fixtures) scoped.push(await state.call("praetor.profiles", { host: fixture.label }));
+  check(
+    "profile export scopes four pins to each host",
+    scoped.every((entry, index) => {
+      const expected = resultByHost.get(fixtures[index].id)?.publicKey;
+      return (
+        entry.isError === false &&
+        entry.json?.count === 4 &&
+        entry.json?.profiles?.every((profile) => profile.serverPublicKey === expected)
+      );
+    }),
+    scoped.map((entry) => `${entry.json?.hostId}:${entry.json?.count}`).join(" / "),
+  );
 
   const audit = await state.call("audit.tail", { limit: 100 });
   const entries = audit.json?.entries ?? [];
+  const installEntries = entries.filter((entry) => entry.tool === "praetor.install_all");
+  const refusedEntry = installEntries.find((entry) => entry.ok === false);
+  const confirmedEntry = installEntries.find((entry) => entry.ok === true);
   check(
-    "audit records the refused call and the confirmed install",
-    entries.some((entry) => entry.tool === "praetor.install_all" && entry.ok === false) &&
-      entries.some((entry) => entry.tool === "praetor.install_all" && entry.ok === true),
-    `${entries.length} entries`,
+    "audit records the refused gate and the confirmed fleet install",
+    installEntries.length === 2 &&
+      Boolean(refusedEntry) &&
+      Boolean(confirmedEntry) &&
+      /confirm/i.test(refusedEntry.error ?? "") &&
+      confirmedEntry.args?.confirm === true,
+    `${installEntries.length} install_all entries`,
+  );
+  check(
+    "audit entries contain no private keys or SSH passwords",
+    !/PRIVATE KEY/.test(audit.text) && fixtures.every((fixture) => !audit.text.includes(fixture.password)),
   );
 } catch (error) {
   check("PRAETOR install integration completed without throwing", false, error instanceof Error ? error.message : String(error));

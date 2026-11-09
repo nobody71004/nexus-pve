@@ -240,7 +240,7 @@ try {
   check("packaged MCP server file exists", existsSync(mcpServer), mcpServer);
   if (existsSync(mcpServer)) {
     const mcp = await runMcpDiagnostic(mcpServer, mcpHome);
-    const required = ["praetor.overview", "praetor.plan", "praetor.profiles", "praetor.install", "praetor.install_all"];
+    const required = ["praetor.overview", "praetor.plan", "praetor.profiles", "praetor.install", "praetor.install_all", "praetor.rotate"];
     check("MCP initialize identifies nexus-pve", mcp.init?.serverInfo?.name === "nexus-pve");
     check(
       "MCP exposes the PRAETOR tool surface",

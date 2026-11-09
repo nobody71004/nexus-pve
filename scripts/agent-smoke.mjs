@@ -5,15 +5,20 @@
  * 2. spawns the real `dist-electron/mcp-server.cjs` over stdio JSON-RPC,
  * 3. drives full agent runs: fleet health sweep -> gated fleet backup ->
  *    restore -> snapshot rollback -> schedules -> evidence bundle -> dev tools,
- * 4. asserts both the agent responses and the Proxmox calls the mock received.
+ * 4. exercises the PRAETOR install gate and an active-Proxmox-firewall status
+ *    regression through a local mock SSH host,
+ * 5. asserts both the agent responses and the Proxmox calls the mock received.
  *
  * No network, no real Proxmox, no credentials.
  */
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import crypto from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import ssh2 from "ssh2";
 import { startMockServer } from "./mock-pve.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -21,6 +26,7 @@ const root = path.resolve(here, "..");
 const serverPath = path.join(root, "dist-electron", "mcp-server.cjs");
 
 const TOKEN = "smoke@pve!agent=mock-secret";
+const FIREWALL_PUBLIC_KEY = crypto.randomBytes(1216).toString("base64");
 const checks = [];
 const check = (name, ok, detail = "") => {
   checks.push({ name, ok, detail });
@@ -29,6 +35,7 @@ const check = (name, ok, detail = "") => {
 
 const home = mkdtempSync(path.join(tmpdir(), "nexus-pve-smoke-"));
 const mock = await startMockServer(0);
+let firewallSsh = null;
 
 const child = spawn(process.execPath, [serverPath], {
   cwd: root,
@@ -116,11 +123,139 @@ const waitFor = async (predicate, timeoutMs = 30000, label = "condition") => {
   }
 };
 
+function encryptSecret(plain, key) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const data = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
+  return `v1.${iv.toString("base64")}.${cipher.getAuthTag().toString("base64")}.${data.toString("base64")}`;
+}
+
+function portIsFree(host, port) {
+  return new Promise((resolve) => {
+    const probe = net.createServer();
+    probe.once("error", () => resolve(false));
+    probe.listen(port, host, () => probe.close(() => resolve(true)));
+  });
+}
+
+async function pickFirewallHost() {
+  for (let index = 9; index < 32; index += 1) {
+    const host = `127.0.0.${index}`;
+    if (await portIsFree(host, 9443)) return host;
+  }
+  throw new Error("no loopback address with TCP 9443 free for the PRAETOR firewall fixture");
+}
+
+function firewallStatus(expectedSha) {
+  return [
+    "installed=yes",
+    `sha=${expectedSha}`,
+    "active=active",
+    `pubkey=${FIREWALL_PUBLIC_KEY}`,
+    "node=v22.11.0",
+    "profiles=yes",
+    "listen_count=1",
+    "listen_bind=0.0.0.0:9443",
+    "pve=yes",
+    "pvefw_status=Status: enabled",
+    "pvefw_active=yes",
+    "pvefw_policy=DROP",
+    "pvefw_allow=no",
+    "pvefw_readable=yes",
+    "",
+  ].join("\n");
+}
+
+function unreadableFirewallStatus(expectedSha) {
+  return [
+    "installed=yes",
+    `sha=${expectedSha}`,
+    "active=active",
+    `pubkey=${FIREWALL_PUBLIC_KEY}`,
+    "node=v22.11.0",
+    "profiles=yes",
+    "listen_count=1",
+    "listen_bind=0.0.0.0:9443",
+    "pve=yes",
+    "pvefw_status=",
+    "pvefw_active=unknown",
+    "pvefw_policy=",
+    "pvefw_allow=unknown",
+    "pvefw_readable=no",
+    "",
+  ].join("\n");
+}
+
+function startMockSsh(host, output) {
+  const { privateKey } = crypto.generateKeyPairSync("rsa", {
+    modulusLength: 2048,
+    privateKeyEncoding: { type: "pkcs1", format: "pem" },
+    publicKeyEncoding: { type: "spki", format: "pem" },
+  });
+  const sockets = new Set();
+  const scripts = [];
+  const server = new ssh2.Server({ hostKeys: [privateKey] }, (client) => {
+    client.on("error", () => {});
+    client.on("authentication", (ctx) => {
+      if (ctx.method === "password" && ctx.username === "root") {
+        ctx.accept();
+        return;
+      }
+      ctx.reject(["password"]);
+    });
+    client.on("session", (accept) => {
+      const session = accept();
+      session.on("exec", (acceptExec) => {
+        const stream = acceptExec();
+        let script = "";
+        stream.on("data", (chunk) => {
+          script += chunk.toString();
+        });
+        stream.on("end", () => {
+          scripts.push(script);
+          const result = typeof output === "function" ? output(script) : output;
+          stream.write(result);
+          stream.exit(0);
+          stream.end();
+        });
+      });
+    });
+  });
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+  });
+  return new Promise((resolve, reject) => {
+    const onError = (error) => reject(error);
+    server.once("error", onError);
+    server.listen(0, host, () => {
+      server.removeListener("error", onError);
+      server.on("error", () => {});
+      resolve({
+        port: server.address().port,
+        scripts,
+        close: () =>
+          new Promise((done) => {
+            for (const socket of sockets) socket.destroy();
+            server.close(() => done());
+          }),
+      });
+    });
+  });
+}
+
 const cleanup = async () => {
   try {
     child.kill();
   } catch {
     /* already gone */
+  }
+  if (firewallSsh) {
+    try {
+      await firewallSsh.close();
+    } catch {
+      /* already closed */
+    }
   }
   await mock.close();
   rmSync(home, { recursive: true, force: true });
@@ -183,6 +318,7 @@ try {
     "praetor.profiles",
     "praetor.install",
     "praetor.install_all",
+    "praetor.rotate",
   ];
   const missing = required.filter((name) => !names.includes(name));
   check("tool registry exposes the full PVE + dev surface", missing.length === 0, missing.length ? `missing: ${missing.join(", ")}` : `${names.length} tools`);
@@ -201,6 +337,7 @@ try {
       destructive.includes("snapshot.rollback") &&
       destructive.includes("praetor.install") &&
       destructive.includes("praetor.install_all") &&
+      destructive.includes("praetor.rotate") &&
       destructive.length >= 3,
     destructive.join(","),
   );
@@ -219,7 +356,10 @@ try {
   const praetor = await call("praetor.overview");
   check(
     "praetor.overview reads the bundled rollout without SSH hosts",
-    /^[a-f0-9]{64}$/.test(praetor.json?.expectedSha ?? "") && Array.isArray(praetor.json?.hosts) && praetor.json.hosts.length === 0,
+    /^[a-f0-9]{64}$/.test(praetor.json?.expectedSha ?? "") &&
+      Array.isArray(praetor.json?.hosts) &&
+      praetor.json.hosts.length === 0 &&
+      typeof praetor.json?.historyPath === "string",
     `${praetor.json?.expectedSha?.slice(0, 12)}…`,
   );
   const praetorPlan = await call("praetor.plan");
@@ -231,6 +371,188 @@ try {
   check(
     "praetor.profiles reads the local profile store",
     praetorProfiles.isError === false && praetorProfiles.json?.count === 0 && typeof praetorProfiles.json?.path === "string",
+  );
+
+  // ---- PRAETOR install gate (mock fleet, no SSH) --------------------------
+  // Seed one host so the gate can resolve a target. It points at a closed
+  // loopback port; a gate regression would try SSH and fail visibly rather
+  // than touching a real machine.
+  const configPath = path.join(home, "config.json");
+  const gateConfig = existsSync(configPath)
+    ? JSON.parse(readFileSync(configPath, "utf8"))
+    : {
+        version: 1,
+        hosts: [],
+        sshHosts: [],
+        settings: { pollMs: 8000, accent: "cyan", reduceMotion: false, confirmDestructive: true },
+      };
+  gateConfig.sshHosts = [
+    {
+      id: "praetor-gate-host",
+      label: "praetor-gate",
+      host: "127.0.0.1",
+      port: 1,
+      username: "root",
+      authMode: "key",
+      keyPath: "~/.ssh/nexus-mock-missing",
+      hasSecret: false,
+      color: "#38f2ff",
+      createdAt: Date.now(),
+    },
+  ];
+  writeFileSync(configPath, `${JSON.stringify(gateConfig, null, 2)}\n`, { mode: 0o600 });
+  const gateConfigBefore = readFileSync(configPath, "utf8");
+
+  const installGate = await call("praetor.install", { host: "praetor-gate" });
+  check(
+    "unconfirmed praetor.install is refused before SSH",
+    installGate.isError === true && /confirm/i.test(installGate.json?.error ?? installGate.text),
+    installGate.json?.error ?? installGate.text.slice(0, 200),
+  );
+  const fleetGate = await call("praetor.install_all", {});
+  check(
+    "unconfirmed praetor.install_all is refused before SSH",
+    fleetGate.isError === true && /confirm/i.test(fleetGate.json?.error ?? fleetGate.text),
+    fleetGate.json?.error ?? fleetGate.text.slice(0, 200),
+  );
+  const profilesAfterGate = await call("praetor.profiles");
+  check(
+    "refused PRAETOR installs leave config and profiles untouched",
+    readFileSync(configPath, "utf8") === gateConfigBefore && profilesAfterGate.json?.count === 0,
+  );
+
+  // ---- PRAETOR status: active Proxmox firewall without a 9443 allowance -----
+  // The mock SSH host answers the real status script with active PVE firewall
+  // evidence. Its loopback address has no listener on 9443, so the real TCP
+  // probe fails while the host still reports a listener. This must classify as
+  // a firewall block, not "not listening" and not a ready rollout.
+  if (!praetor.json?.expectedSha) throw new Error("initial PRAETOR overview did not return the expected bundle hash");
+  const firewallHost = await pickFirewallHost();
+  firewallSsh = await startMockSsh(firewallHost, firewallStatus(praetor.json.expectedSha));
+  const firewallPassword = crypto.randomBytes(18).toString("base64url");
+  const masterKey = crypto.randomBytes(32);
+  mkdirSync(path.join(home, "keys"), { recursive: true, mode: 0o700 });
+  writeFileSync(path.join(home, "keys", "master.key"), masterKey, { mode: 0o600 });
+  gateConfig.sshHosts = [
+    {
+      id: "praetor-firewall-host",
+      label: "praetor-firewall",
+      host: firewallHost,
+      port: firewallSsh.port,
+      username: "root",
+      authMode: "password",
+      hasSecret: true,
+      color: "#ff5c7a",
+      createdAt: Date.now(),
+      secretEnc: encryptSecret(firewallPassword, masterKey),
+    },
+  ];
+  writeFileSync(configPath, `${JSON.stringify(gateConfig, null, 2)}\n`, { mode: 0o600 });
+
+  const firewallOverview = await call("praetor.overview");
+  const firewallHostStatus = firewallOverview.json?.hosts?.find((host) => host.hostId === "praetor-firewall-host");
+  check(
+    "praetor.overview reports an active Proxmox firewall with no TCP 9443 allowance as blocked",
+    firewallOverview.isError === false &&
+      firewallOverview.json?.hosts?.length === 1 &&
+      firewallHostStatus?.state === "error" &&
+      firewallHostStatus?.firewallBlocked === true &&
+      firewallHostStatus?.tcpReachable === false &&
+      firewallHostStatus?.portListening === true &&
+      firewallHostStatus?.bindAddress === "0.0.0.0:9443" &&
+      firewallHostStatus?.installedSha === praetor.json.expectedSha &&
+      firewallHostStatus?.profilesOnHost === true &&
+      firewallHostStatus?.publicKey === FIREWALL_PUBLIC_KEY &&
+      /no TCP 9443 allow rule was found/.test(firewallHostStatus?.firewallDetail ?? "") &&
+      /policy_in DROP/.test(firewallHostStatus?.firewallDetail ?? "") &&
+      /TCP 9443 blocked by the Proxmox firewall/.test(firewallHostStatus?.detail ?? "") &&
+      /TCP 9443 blocked by the Proxmox firewall/.test(firewallHostStatus?.error ?? ""),
+    `${firewallHostStatus?.state}: ${firewallHostStatus?.firewallDetail ?? "no host"}`,
+  );
+  check(
+    "readable firewall evidence does not trigger a sudo pass",
+    firewallSsh.scripts.length === 1 && !/sudo -n/.test(firewallSsh.scripts[0] ?? ""),
+    `${firewallSsh.scripts.length} status pass(es)`,
+  );
+  check(
+    "praetor.overview records the current TCP and firewall state in history",
+    firewallHostStatus?.firewallActive === true &&
+      firewallHostStatus?.firewallAllow === false &&
+      firewallHostStatus?.history?.length === 1 &&
+      firewallHostStatus.history[0]?.tcpReachable === false &&
+      firewallHostStatus.history[0]?.firewallBlocked === true &&
+      firewallHostStatus.history[0]?.firewallActive === true &&
+      firewallHostStatus.history[0]?.firewallAllow === false &&
+      typeof firewallHostStatus.history[0]?.checkedAt === "string",
+    `${firewallHostStatus?.history?.length ?? 0} checks`,
+  );
+
+  const firewallHistory = await call("praetor.overview");
+  const firewallHistoryHost = firewallHistory.json?.hosts?.find((host) => host.hostId === "praetor-firewall-host");
+  check(
+    "praetor.overview appends TCP and firewall history across checks",
+    firewallHistory.isError === false &&
+      firewallHistoryHost?.history?.length === 2 &&
+      firewallHistoryHost.history.every(
+        (entry) =>
+          entry.tcpReachable === false &&
+          entry.firewallBlocked === true &&
+          entry.firewallActive === true &&
+          entry.firewallAllow === false,
+      ) &&
+      firewallHistoryHost.history[0]?.checkedAt <= firewallHistoryHost.history[1]?.checkedAt &&
+      /[/\\]praetor[/\\]history\.json$/.test(firewallHistory.json?.historyPath ?? ""),
+    `${firewallHistoryHost?.history?.length ?? 0} checks / ${firewallHistory.json?.historyPath ?? "no path"}`,
+  );
+
+  check(
+    "the firewall block preserves the real TCP probe failure",
+    /TCP .*:9443/.test(firewallHostStatus?.tcpError ?? "") &&
+      !/not listening|bound only/i.test(firewallHostStatus?.tcpError ?? ""),
+    firewallHostStatus?.tcpError,
+  );
+  check(
+    "the firewall status response exposes no private key material",
+    !/PRIVATE KEY|server\.key/.test(firewallOverview.text),
+  );
+
+  const firewallPlan = await call("praetor.plan");
+  const firewallPending = firewallPlan.json?.pending?.[0];
+  check(
+    "praetor.plan keeps the firewalled host pending",
+    firewallPlan.isError === false &&
+      firewallPlan.json?.totalHosts === 1 &&
+      firewallPlan.json?.pending?.length === 1 &&
+      firewallPending?.hostId === "praetor-firewall-host" &&
+      firewallPending?.state === "error" &&
+      firewallPending?.firewallBlocked === true &&
+      /TCP 9443 blocked by the Proxmox firewall/.test(firewallPending?.detail ?? ""),
+    `${firewallPending?.state}: ${firewallPending?.detail ?? "no pending host"}`,
+  );
+
+  // ---- PRAETOR status: non-root firewall readability ----------------------
+  // The normal probe reports unreadable firewall evidence. The second status
+  // pass must carry sudo -n and only then reveal the active blocking rule.
+  await firewallSsh.close();
+  const unreadableStatus = unreadableFirewallStatus(praetor.json.expectedSha);
+  firewallSsh = await startMockSsh(firewallHost, (script) =>
+    /sudo -n/.test(script) ? firewallStatus(praetor.json.expectedSha) : unreadableStatus,
+  );
+  gateConfig.sshHosts[0].port = firewallSsh.port;
+  writeFileSync(configPath, `${JSON.stringify(gateConfig, null, 2)}\n`, { mode: 0o600 });
+  const elevatedOverview = await call("praetor.overview");
+  const elevatedHost = elevatedOverview.json?.hosts?.find((host) => host.hostId === "praetor-firewall-host");
+  check(
+    "non-root status retries unreadable firewall rules with sudo -n",
+    elevatedOverview.isError === false &&
+      elevatedHost?.firewallBlocked === true &&
+      elevatedHost?.firewallActive === true &&
+      elevatedHost?.firewallAllow === false &&
+      /no TCP 9443 allow rule was found/.test(elevatedHost?.firewallDetail ?? "") &&
+      firewallSsh.scripts.length === 2 &&
+      !/sudo -n/.test(firewallSsh.scripts[0] ?? "") &&
+      /sudo -n/.test(firewallSsh.scripts[1] ?? ""),
+    `${firewallSsh.scripts.length} passes / ${elevatedHost?.firewallDetail ?? "no host"}`,
   );
 
   const overview = await call("fleet.overview", { host: hostId });

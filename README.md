@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="License: GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-2ea44f?style=flat-square" /></a>
   <img alt="Platform: Windows 10/11 x64" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0a84ff?style=flat-square" />
   <img alt="Edge runtime: Python 3.10+ and nftables" src="https://img.shields.io/badge/edge-Python%203.10%2B%20%2B%20nftables-7c5cff?style=flat-square" />
-  <img alt="Version 1.0.6" src="https://img.shields.io/badge/version-1.0.6-3ddc97?style=flat-square" />
+  <img alt="Version 1.0.7" src="https://img.shields.io/badge/version-1.0.7-3ddc97?style=flat-square" />
 </p>
 
 > **Documentation image:** the hero uses documentation addresses from the RFC 5737 ranges. It does not show a live edge address. The project ships with fictional demo data and no credentials, private keys, or real infrastructure addresses.
@@ -73,7 +73,7 @@ The result is a console for a small but real fleet: a Proxmox cluster, a few Lin
 
 | Area | Implementation |
 | --- | --- |
-| Product | Nexus PVE `1.0.6` |
+| Product | Nexus PVE `1.0.7` |
 | Desktop shell | Electron 33, React 18, TypeScript, Vite |
 | Desktop target | Windows 10/11 x64 portable executable |
 | Proxmox access | HTTPS API with token or password authentication, optional TLS verification |
@@ -89,9 +89,21 @@ The result is a console for a small but real fleet: a Proxmox cluster, a few Lin
 
 ### Portable build
 
-Prebuilt portable artifacts are published on the repository's [Releases](../../releases) page. The current build is [`v1.0.6`](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.6).
+Prebuilt portable artifacts are published on the repository's [Releases](../../releases) page. The current build is [`v1.0.7`](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.7).
 
-The portable target is Windows 10/11 x64. It requires no installer and no system Node.js runtime. Verify the download against the SHA-256 in the release notes; a local checkout that includes `NexusPVE-1.0.6-portable.exe` should match the same hash.
+The portable target is Windows 10/11 x64. It requires no installer and no system Node.js runtime. Verify the download against the SHA-256 in the release notes; a local checkout that includes `NexusPVE-1.0.7-portable.exe` should match the same hash.
+
+### Release 1.0.7
+
+`v1.0.7` makes PRAETOR egress checks evidence-based and adds transactional per-host key rotation.
+
+- **Key rotation** — Rotate key on a ready host regenerates its X-Wing keypair, rewrites the four host profiles, saves the new pins locally, and restarts the egress. The previous keypair and profiles are restored if the unit does not stay active; clients must re-import the refreshed pins.
+- **Reachability diagnosis** — `praetor.overview` now opens TCP 9443 from the workstation and distinguishes a missing listener, a loopback-only bind, an upstream timeout, and an active Proxmox firewall without a 9443 allowance. Non-root status checks stay read-only; `sudo -n` is used only for firewall reads.
+- **Bounded history** — Every overview appends a per-host check to `praetor/history.json`, retaining up to 96 probes. The Command Deck adds a single-host PRAETOR health panel with the last 24 checks and a 60-second refresh.
+- **Agent surface** — New `praetor.rotate` tool (requires `confirm: true`) and richer overview evidence, including TCP latency, bind address, firewall status, and retained history.
+- **Test coverage** — A raw stdio PRAETOR example, a two-host disposable Docker fleet test, and smoke coverage for the unconfirmed install gate and active-Proxmox-firewall diagnosis.
+
+The portable asset and its SHA-256 are attached to the [`v1.0.7` release](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.7).
 
 ### Release 1.0.6
 
@@ -99,7 +111,7 @@ The portable target is Windows 10/11 x64. It requires no installer and no system
 
 - **Praetor egress workspace** — a dedicated tab rolls the bundled egress data plane, per-host X-Wing key, systemd units, firewall allowance, and four PRAETOR Command profiles across the SSH inventory.
 - **Fleet rollout** — Install on all is sequential, preserves existing host keys, and reports per-host state; Proxmox nodes must be present as SSH hosts before they can be covered.
-- **Agent tools** — `praetor.overview`, `praetor.plan`, `praetor.profiles`, `praetor.install`, and `praetor.install_all`; installs require `confirm: true`.
+- **Agent tools** — `praetor.overview`, `praetor.plan`, `praetor.profiles`, `praetor.install`, and `praetor.install_all`; both install tools require `confirm: true`.
 - **Packaged MCP** — the MCP bundle and PRAETOR resources are unpacked together so the headless server can read them from a portable install and the stable per-user MCP layout.
 
 | Asset | Size | SHA-256 |
@@ -140,7 +152,7 @@ npm run preflight
 npm run package
 ```
 
-Output: `release/NexusPVE-1.0.6-portable.exe`.
+Output: `release/NexusPVE-1.0.7-portable.exe`.
 
 For development:
 
@@ -173,7 +185,7 @@ The left navigation is intentionally short:
 | **Linux hosts** | SSH health, helper readiness, filesystem/service visibility, snapshots, journal slices, power/service actions, VNC terminal console |
 | **Network** | Node network interfaces and traffic context |
 | **Security guard** | Baseline posture, drift, scoring, remediation, allowlist/ban controls, hash-chained journal, edge DDoS shield |
-| **Praetor egress** | PRAETOR/1 sealed egress rollout: per-host keys and client profiles, fleet status, install/update, and Proxmox SSH coverage |
+| **Praetor egress** | PRAETOR/1 sealed egress rollout: per-host keys and client profiles, fleet status, install/update, key rotation, and Proxmox SSH coverage |
 | **Backup studio** | vzdump archives, coverage, manual backups, restore, archive deletion, cluster backup schedules |
 | **Agent pipelines** | Built-in and user-defined multi-step runs, streaming logs, retries, fan-out, approval gates |
 | **Connections** | Proxmox endpoints, Linux/SSH hosts, authentication, TLS verification, MCP client setup |
@@ -590,9 +602,11 @@ The installer supports apt, dnf, yum, pacman, zypper and apk. It prefers sway + 
 
 ### PRAETOR/1 sealed egress
 
-The dedicated **Praetor egress** tab rolls the bundled egress data plane, per-host X-Wing key, systemd units, firewall allowance, and four PRAETOR Command profiles across every configured SSH host. **Install on all** is sequential and reports per-host status; existing host keys are preserved across updates. The installer uses Node 20+ when present, otherwise it verifies and installs a private Node 22 runtime (x64 or arm64) under `/opt/praetor-egress/node`. Profiles use the SSH host or address as the public endpoint and are saved both on the host (`/opt/praetor-egress/profiles.json`) and locally for copy/import. The tab compares discovered Proxmox nodes with the SSH inventory and names any node that still needs an SSH entry before it can be covered. Private keys never leave the server.
+The dedicated **Praetor egress** tab rolls the bundled egress data plane, per-host X-Wing key, systemd units, firewall allowance, and four PRAETOR Command profiles across every configured SSH host. **Install on all** is sequential and reports per-host status; existing host keys are preserved across updates. The installer uses Node 20+ when present, otherwise it verifies and installs a private Node 22 runtime (x64 or arm64) under `/opt/praetor-egress/node`. On a Proxmox host, it adds or validates a host-level `IN ACCEPT -p tcp -dport 9443` rule in the local node's `host.fw`; when the Proxmox firewall is active, the installer checks the effective ruleset and fails the host rollout if TCP 9443 is still not allowed. Profiles use the SSH host or address as the public endpoint and are saved both on the host (`/opt/praetor-egress/profiles.json`) and locally for copy/import. The tab compares discovered Proxmox nodes with the SSH inventory and names any node that still needs an SSH entry before it can be covered. **Rotate key** on a ready host regenerates that host's X-Wing keypair, rewrites `/opt/praetor-egress/profiles.json`, saves the four refreshed pins locally, and restarts the egress. The previous keypair and profiles are restored if the service does not come back; clients still holding the old pin must re-import the profiles. Private keys never leave the server.
 
-MCP clients can inspect the same rollout with `praetor.overview`, `praetor.plan`, and `praetor.profiles`; `praetor.install` and `praetor.install_all` perform the rollout and require `confirm: true`.
+PRAETOR status is not derived from systemd alone. Each overview opens a TCP connection to `host:9443`, reads the listener socket, and inspects both legacy `pve-firewall` and `proxmox-firewall` state plus the compiled/effective host rules. A failed probe on an otherwise listening host is reported as a Proxmox firewall block only when the firewall is active, no TCP 9443 allowance is found, and the input policy is not `ACCEPT`; upstream timeouts, loopback-only binds, and a missing listener remain distinct diagnoses. Each overview also appends a bounded per-host check to `praetor/history.json`, retaining recent TCP 9443 reachability and Proxmox firewall evidence so an intermittent failure remains visible after a later successful probe. On a non-root SSH account the status pass stays read-only. If the firewall state or rule set cannot be read, Nexus retries only those firewall reads with `sudo -n`; it never prompts for a password or uses the stored SSH password for sudo. Without passwordless sudo, the rule state is reported as unreadable instead of being guessed.
+
+MCP clients can inspect the same rollout with `praetor.overview`, `praetor.plan`, and `praetor.profiles`; `praetor.install` and `praetor.install_all` perform the rollout, and `praetor.rotate` rotates one host's egress key. All three require `confirm: true`.
 
 ---
 
@@ -648,7 +662,7 @@ The registry covers more than 60 tools across:
 - Linux/SSH telemetry, journal, services, power, backups, and helper operations;
 - security overview, scanning, policy, enforcement, containment, and journal;
 - DDoS overview, status, rules, install, mode, ban, allow, config, and journal;
-- PRAETOR overview, rollout planning, profile export, per-host install, and fleet install;
+- PRAETOR overview, rollout planning, profile export, per-host install, fleet install, and key rotation;
 - development build, typecheck, smoke, package, and file tools;
 - pipeline list/run/status/approve/cancel and audit.
 
@@ -658,25 +672,57 @@ Tools are annotated by category. Destructive tools require an explicit confirmat
 
 Each block is one complete line of newline-delimited JSON-RPC. MCP clients perform the `initialize` handshake; these snippets are the `tools/call` requests themselves.
 
-`praetor.overview` is read-only and takes no arguments. It returns the expected bundle hash, profile path, check time, and per-host service state, installed hash, endpoint, public key, and client profiles:
+`praetor.overview` is read-only and takes no arguments. It returns the expected bundle hash, profile path, check time, and per-host service state, installed hash, endpoint, TCP 9443 reachability, Proxmox firewall evidence, retained check history, public key, and client profiles:
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"praetor.overview","arguments":{}}}
 ```
 
+`praetor.plan` is read-only and takes no arguments. It compares every configured SSH host with the expected bundle and profiles, then returns the exact hosts that need installation or repair:
+
+```json
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"praetor.plan","arguments":{}}}
+```
+
+`praetor.profiles` is read-only. Omit `host` to export every saved profile, or pass a host label, address, or id to scope the result. Replace the example host with an entry from your SSH inventory:
+
+```json
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"praetor.profiles","arguments":{}}}
+```
+
+Same call, scoped to one host:
+
+```json
+{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"praetor.profiles","arguments":{"host":"edge-01"}}}
+```
+
 `praetor.install_all` is destructive and requires `confirm: true`. Omitting `hosts` targets every configured SSH host; this is the fleet-wide form:
 
 ```json
-{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"praetor.install_all","arguments":{"confirm":true}}}
+{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"praetor.install_all","arguments":{"confirm":true}}}
 ```
 
 Pass host labels, addresses, or ids to limit the rollout. Replace the example names with entries from your SSH inventory:
 
 ```json
-{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"praetor.install_all","arguments":{"hosts":["edge-01","edge-02"],"confirm":true}}}
+{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"praetor.install_all","arguments":{"hosts":["edge-01","edge-02"],"confirm":true}}}
 ```
 
 Installs run sequentially and return `total`, `installed`, `failed`, and per-host results. Hosts missing from the SSH inventory are not invented. Run `praetor.plan` first to see which hosts need installation or repair.
+
+`praetor.rotate` is destructive and requires `confirm: true`. It regenerates one host's X-Wing keypair, updates `/opt/praetor-egress/profiles.json` and the four local pins, and restarts the egress. Replace the example host with an entry from your SSH inventory; clients must re-import the refreshed profiles:
+
+```json
+{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"praetor.rotate","arguments":{"host":"edge-01","confirm":true}}}
+```
+
+`npm run smoke:praetor:stdio` is a raw stdio example that runs the documented read-only PRAETOR calls against a hermetic two-host mock fleet. It seeds a temporary Nexus home with `edge-relay` and `demo-dedicated` pointing at closed loopback ports, starts the compiled MCP server, and writes newline-delimited JSON-RPC directly to stdin. The destructive calls are sent without `confirm` so the MCP gate refuses them and the seeded pin bundle stays unchanged. Confirmed install paths run in `npm run smoke:praetor` against a two-host disposable Docker fleet. No SSH, Proxmox, Docker, or credentials are used by the stdio example. Add `--raw` to print the full request/response transcript:
+
+```sh
+node scripts/praetor-stdio-smoke.mjs --raw
+```
+
+`npm run smoke` also seeds one mock Linux host and asserts that unconfirmed `praetor.install` and `praetor.install_all` calls are refused before any SSH work, leaving the config and local profile store untouched. It runs in `preflight` and needs no Docker.
 
 ### Built-in pipelines
 
@@ -786,9 +832,10 @@ This separation keeps the desktop responsive and makes the edge data plane indep
 | `npm run typecheck` | TypeScript checks for renderer and Electron |
 | `npm run build` | Production renderer and main-process bundles |
 | `npm test` | Hermetic edge-safety regression tests |
-| `npm run smoke` | Mock Proxmox/MCP end-to-end checks |
+| `npm run smoke` | Mock Proxmox/MCP end-to-end checks, including the unconfirmed PRAETOR install gate and active-Proxmox-firewall status regression |
 | `npm run smoke:agent-fabric` | Mock OpenAI-compatible model drives two MCP tool calls; no API key |
-| `npm run smoke:praetor` | Docker-backed MCP test: confirmed PRAETOR install on a disposable SSH host |
+| `npm run smoke:praetor` | Docker-backed MCP test: confirmed PRAETOR install across a two-host disposable fleet |
+| `npm run smoke:praetor:stdio` | Raw stdio example: documented PRAETOR calls against a seeded mock fleet; no SSH or Docker |
 | `npm run smoke:packaged` | Launch the packaged EXE, seed an isolated profile, and verify the renderer plus MCP diagnostics |
 | `npm run verify:packaged` | Build the unpacked Windows package and run the packaged smoke test |
 | `npm run preflight` | Typecheck, build, edge tests, and smoke |
@@ -798,7 +845,7 @@ This separation keeps the desktop responsive and makes the edge data plane indep
 
 The tests use fictional hosts and a mock Proxmox service. They do not contact a live edge.
 
-`npm run smoke:praetor` is an opt-in PRAETOR install integration test. Run it after `npm run build:main`. It builds a disposable Ubuntu systemd container with OpenSSH, seeds an isolated SSH host and temporary Nexus home, then drives the compiled MCP server through a refused and a confirmed `praetor.install_all`. It verifies the egress unit, TCP 9443 listener, key permissions and four client profiles before deleting the container. Docker must be using Linux containers and the fixture needs network access for the Node 22 runtime. If Docker is unavailable the test skips; set `PRAETOR_TEST_REQUIRE_DOCKER=1` to make that a failure in CI.
+`npm run smoke:praetor` is an opt-in PRAETOR install integration test. Run it after `npm run build:main`. It builds one disposable Ubuntu systemd image and starts two containers, publishing each SSH port and TCP 9443 on a distinct loopback address (`127.0.0.1` and `127.0.0.2`). It seeds two password-auth hosts and a temporary Nexus home, then drives the compiled MCP server through a refused and a confirmed `praetor.install_all`. The test verifies that both hosts install, each gets a distinct X-Wing keypair and four matching client profiles, both egress units listen on TCP 9443, the local pin store keeps the keys separate, and the audit log contains exactly the refused and confirmed calls without private keys or passwords. The containers are deleted afterwards. Docker must use Linux containers and the fixture needs network access for the Node 22 runtime. If Docker is unavailable the test skips; set `PRAETOR_TEST_REQUIRE_DOCKER=1` to make that a failure in CI.
 
 ### CI
 
@@ -916,7 +963,7 @@ If you discover a security issue, avoid posting live credentials, hostnames, or 
 - The UI is an operator console, not a multi-tenant control plane. Team roles and per-machine grants are enforced locally, but they are not an SSO provider or an enterprise identity boundary.
 - The embedded noVNC console requires a VNC daemon listening on the host's loopback interface. Nexus can install and start that terminal service automatically on SSH hosts (sway/wayvnc/foot, or TigerVNC/xterm), but never exposes it beyond loopback. Proxmox nodes must be present as SSH hosts for the installer; an API token alone cannot install packages.
 - A host whose SSH account is neither root nor able to use sudo needs a manual root-shell install first; the app can prompt for a sudo password but cannot create sudo rights.
-- The project is version `1.0.6`; review changes and test against a lab before relying on it for production recovery or attack response.
+- The project is version `1.0.7`; review changes and test against a lab before relying on it for production recovery or attack response.
 
 ---
 

@@ -60,7 +60,7 @@ praetor.overview, praetor.plan, praetor.profiles.
 Mutating tools: vm.action, snapshot.create, backup.run, backup.schedule.save, pipeline.run.
 Destructive tools (require "confirm": true): vm.action for stop/reset/reboot/shutdown,
 snapshot.rollback, snapshot.delete, backup.restore, backup.remove, backup.schedule.delete,
-praetor.install, praetor.install_all.
+praetor.install, praetor.install_all, praetor.rotate.
 
 Start a pipeline with pipeline.run { pipeline, host, vars, waitSeconds } (waitSeconds
 caps at 60). Pipelines pause on destructive steps: inspect with pipeline.status, then
@@ -76,10 +76,14 @@ host; security.contain bans an address. security.enforce and security.contain re
 live SSH session, and refuses a policy file it did not sign.
 Security tools: security.overview, security.scan, security.journal are safe reads/runs.
 PRAETOR egress: praetor.overview, praetor.plan and praetor.profiles are read-only.
-praetor.install pushes the egress, per-host X-Wing key, systemd units, firewall rule and
-four client profiles to one SSH host; praetor.install_all does the same across the fleet.
-Both install tools require "confirm": true. Proxmox nodes need a matching SSH inventory
-entry; the tools never invent one.
+praetor.install pushes the egress, per-host X-Wing key, systemd units, firewall rule
+(including an idempotent Proxmox host rule) and four client profiles to one SSH host;
+praetor.install_all does the same across the fleet. praetor.rotate regenerates one host's
+X-Wing keypair and overwrites every client pin location (host profiles.json and the four
+local profiles); it restores the old keypair and pins if the egress does not come back.
+A host whose TCP 9443 endpoint stays blocked is reported as a failed rollout.
+praetor.install, praetor.install_all and praetor.rotate require "confirm": true. Proxmox
+nodes need a matching SSH inventory entry; the tools never invent one.
 Development tools (dev.tree/read_file/write_file/build/typecheck/smoke/package) operate
 only inside the app directory; writes are backed up under .nexus-backup/.`;
 

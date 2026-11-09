@@ -528,11 +528,24 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
     requireOperator();
     return praetor.overview(store);
   });
+  ipcMain.handle(IPC.praetorHealth, (_event, target: unknown) => {
+    const key = str(target, "host");
+    const host = store.sshHosts().find((entry) => entry.id === key || entry.label.toLowerCase() === key.toLowerCase());
+    if (!host) return null;
+    guardSshHost(host.id);
+    return praetor.hostHealth(store, host.id);
+  });
   ipcMain.handle(IPC.praetorInstall, (_event, hostId: unknown) => {
     requireOperator();
     const id = str(hostId, "host id");
     guardSshHost(id);
     return praetor.install(store, id);
+  });
+  ipcMain.handle(IPC.praetorRotate, (_event, hostId: unknown) => {
+    requireOperator();
+    const id = str(hostId, "host id");
+    guardSshHost(id);
+    return praetor.rotate(store, id);
   });
 
   ipcMain.handle(IPC.mcpStatus, (): McpStatus => {

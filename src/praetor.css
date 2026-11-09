@@ -222,6 +222,116 @@
   white-space: nowrap;
 }
 
+.praetor-history {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.praetor-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 8.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.praetor-history-head span:last-child {
+  overflow: hidden;
+  color: var(--dim);
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.praetor-history-strip {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  min-height: 15px;
+  padding: 2px 0;
+}
+
+.praetor-history-cell {
+  min-width: 2px;
+  height: 8px;
+  flex: 1 1 0;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.praetor-history-cell.reachable {
+  background: rgba(92, 255, 177, 0.82);
+}
+
+.praetor-history-cell.failed {
+  height: 12px;
+  background: rgba(255, 190, 90, 0.85);
+}
+
+.praetor-history-cell.blocked {
+  height: 15px;
+  background: rgba(255, 92, 122, 0.9);
+}
+
+.praetor-history-empty {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.praetor-health {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.praetor-health-endpoint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 11px;
+}
+
+.praetor-health-endpoint .mono:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.praetor-health-detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.praetor-health-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.praetor-health-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .praetor-card footer {
   display: flex;
   align-items: center;
@@ -229,6 +339,13 @@
   gap: 8px;
   padding-top: 10px;
   border-top: 1px solid var(--line);
+}
+
+.praetor-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .praetor-detail {

@@ -160,7 +160,9 @@ const bridge: NexusBridge = {
   },
   praetor: {
     overview: () => ipcRenderer.invoke(IPC.praetorOverview),
+    health: (target: string) => ipcRenderer.invoke(IPC.praetorHealth, target),
     install: (hostId: string) => ipcRenderer.invoke(IPC.praetorInstall, hostId),
+    rotate: (hostId: string) => ipcRenderer.invoke(IPC.praetorRotate, hostId),
   },
   mcp: {
     status: () => ipcRenderer.invoke(IPC.mcpStatus),

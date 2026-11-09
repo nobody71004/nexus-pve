@@ -28,7 +28,7 @@ import type {
   TeamSyncRunResult,
   TeamSyncStatus,
 } from "./team-sync";
-import type { PraetorInstallResult, PraetorOverview } from "./praetor-types";
+import type { PraetorHealth, PraetorInstallResult, PraetorOverview, PraetorRotateResult } from "./praetor-types";
 
 export type {
   RelayChain,
@@ -66,7 +66,7 @@ export type {
   DdosStatus,
 } from "./ddos-types";
 
-export type { PraetorHostStatus, PraetorInstallResult, PraetorOverview, PraetorProfile, PraetorProfileColor, PraetorState, PraetorSuite } from "./praetor-types";
+export type { PraetorCheck, PraetorHealth, PraetorHostStatus, PraetorInstallResult, PraetorOverview, PraetorProfile, PraetorProfileColor, PraetorRotateResult, PraetorState, PraetorSuite } from "./praetor-types";
 
 export type {
   TeamActivityEntry,
@@ -870,7 +870,10 @@ export interface NexusBridge {
   };
   praetor: {
     overview(): Promise<PraetorOverview>;
+    /** Targeted recurring probe for one host: service state plus TCP 9443. */
+    health(target: string): Promise<PraetorHealth | null>;
     install(hostId: string): Promise<PraetorInstallResult>;
+    rotate(hostId: string): Promise<PraetorRotateResult>;
   };
   mcp: {
     status(): Promise<McpStatus>;

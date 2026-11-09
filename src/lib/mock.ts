@@ -19,6 +19,7 @@ import type {
   PraetorInstallResult,
   PraetorOverview,
   PraetorProfile,
+  PraetorRotateResult,
   RelayChain,
   RelayChainInput,
   RelayNodeStatus,
@@ -1075,8 +1076,12 @@ function mockRelayPlan(chain: RelayChain): RelayPlan {
   };
 }
 
-const MOCK_PRAETOR_KEY = "A".repeat(1624);
+let mockPraetorGeneration = 0;
 const mockPraetorProfiles = new Map<string, PraetorProfile[]>();
+
+function mockPraetorKey(): string {
+  return String.fromCharCode(65 + (mockPraetorGeneration % 26)).repeat(1624);
+}
 
 function mockPraetorProfilesFor(host: SshHostSummary): PraetorProfile[] {
   const existing = mockPraetorProfiles.get(host.id);
@@ -1098,7 +1103,7 @@ function mockPraetorProfilesFor(host: SshHostSummary): PraetorProfile[] {
     suite,
     transport: "tcp" as const,
     cellSize: 1024 as const,
-    serverPublicKey: MOCK_PRAETOR_KEY,
+    serverPublicKey: mockPraetorKey(),
     autoConnect,
     tags: ["pq", suite.toLowerCase(), "nexus"],
     color,
@@ -1118,18 +1123,63 @@ function mockPraetorOverview(): PraetorOverview {
       port: host.port,
       username: host.username,
       state: mockPraetorProfiles.has(host.id) ? "ready" : "missing",
-      detail: mockPraetorProfiles.has(host.id) ? "Egress active on TCP 9443" : "Not installed",
+      detail: mockPraetorProfiles.has(host.id) ? "Egress active and TCP 9443 reachable" : "Not installed",
       endpoint: `${host.host}:9443`,
       expectedSha: "mock-praetor-bundle",
       nodeVersion: mockPraetorProfiles.has(host.id) ? "v22.11.0" : undefined,
-      publicKey: mockPraetorProfiles.has(host.id) ? MOCK_PRAETOR_KEY : undefined,
+      publicKey: mockPraetorProfiles.get(host.id)?.[0]?.serverPublicKey,
       profilesOnHost: mockPraetorProfiles.has(host.id),
       profiles: mockPraetorProfiles.has(host.id) ? mockPraetorProfilesFor(host) : [],
+      tcpReachable: mockPraetorProfiles.has(host.id),
+      tcpLatencyMs: mockPraetorProfiles.has(host.id) ? 12 : undefined,
+      portListening: mockPraetorProfiles.has(host.id),
+      bindAddress: mockPraetorProfiles.has(host.id) ? "0.0.0.0:9443" : undefined,
+      firewallBlocked: false,
+      firewallActive: false,
+      firewallAllow: null,
+      firewallDetail: mockPraetorProfiles.has(host.id) ? "Proxmox firewall is not active" : "PRAETOR is not installed",
       checkedAt: Date.now(),
+      history: mockPraetorProfiles.has(host.id)
+        ? Array.from({ length: 8 }, (_, index) => ({
+            checkedAt: Date.now() - (7 - index) * 60_000,
+            state: "ready" as const,
+            tcpReachable: true,
+            tcpLatencyMs: 10 + index,
+            portListening: true,
+            bindAddress: "0.0.0.0:9443",
+            firewallBlocked: false,
+            firewallActive: false,
+            firewallAllow: null,
+            firewallDetail: "Proxmox firewall is not active",
+          }))
+        : [],
     })),
     expectedSha: "mock-praetor-bundle",
     profilesPath: "%APPDATA%\\NexusPVE\\praetor\\profiles.json",
+    historyPath: "%APPDATA%\\NexusPVE\\praetor\\history.json",
     checkedAt: Date.now(),
+  };
+}
+
+function mockPraetorHealth(target: string) {
+  const overview = mockPraetorOverview();
+  const host =
+    overview.hosts.find((entry) => entry.hostId === target) ??
+    overview.hosts.find((entry) => entry.label.toLowerCase() === target.toLowerCase()) ??
+    overview.hosts[0];
+  if (!host) return null;
+  return {
+    hostId: host.hostId,
+    label: host.label,
+    endpoint: host.endpoint,
+    state: host.state,
+    detail: host.detail,
+    tcpReachable: host.tcpReachable,
+    tcpLatencyMs: host.tcpLatencyMs,
+    tcpError: host.tcpError,
+    firewallBlocked: host.firewallBlocked,
+    checkedAt: host.checkedAt,
+    history: host.history,
   };
 }
 
@@ -1647,6 +1697,7 @@ export function createMockBridge(): NexusBridge {
     },
     praetor: {
       overview: async () => mockPraetorOverview(),
+      health: async (target: string) => mockPraetorHealth(target),
       install: async (hostId: string): Promise<PraetorInstallResult> => {
         const host = sshHosts.find((entry) => entry.id === hostId) ?? sshHosts[0];
         if (!host) throw new Error("No SSH host configured");
@@ -1658,10 +1709,31 @@ export function createMockBridge(): NexusBridge {
           state: "ready",
           route: "nopasswd",
           endpoint: `${host.host}:9443`,
-          publicKey: MOCK_PRAETOR_KEY,
+          publicKey: mockPraetorKey(),
           profiles,
           output: "@@node=/usr/bin/node\n@@endpoint=" + host.host + ":9443\n@@profiles=4\n@@done",
           latencyMs: 820,
+        };
+      },
+      rotate: async (hostId: string): Promise<PraetorRotateResult> => {
+        const host = sshHosts.find((entry) => entry.id === hostId) ?? sshHosts[0];
+        if (!host) throw new Error("No SSH host configured");
+        const oldPublicKey = mockPraetorProfiles.get(host.id)?.[0]?.serverPublicKey;
+        mockPraetorGeneration += 1;
+        mockPraetorProfiles.delete(host.id);
+        const profiles = mockPraetorProfilesFor(host);
+        return {
+          hostId: host.id,
+          label: host.label,
+          ok: true,
+          state: "ready",
+          route: "nopasswd",
+          endpoint: `${host.host}:9443`,
+          publicKey: mockPraetorKey(),
+          oldPublicKey,
+          profiles,
+          output: `@@oldpubkey=${oldPublicKey ?? ""}\n@@pubkey=${mockPraetorKey()}\n@@profiles=4\n@@done`,
+          latencyMs: 1140,
         };
       },
     },

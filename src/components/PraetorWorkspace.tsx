@@ -4,6 +4,7 @@ import type {
   PraetorInstallResult,
   PraetorOverview,
   PraetorProfile,
+  PraetorRotateResult,
 } from "../../shared/types";
 import { bridge } from "../lib/bridge";
 import { cx } from "../lib/format";
@@ -34,6 +35,29 @@ function shortKey(value?: string): string {
   return `${value.slice(0, 10)}…${value.slice(-6)}`;
 }
 
+function historyTitle(check: PraetorHostStatus["history"][number]): string {
+  const tcp = check.tcpReachable
+    ? `TCP 9443 reachable${check.tcpLatencyMs !== undefined ? ` · ${check.tcpLatencyMs} ms` : ""}`
+    : `TCP 9443 unreachable${check.tcpError ? ` · ${check.tcpError}` : ""}`;
+  const firewall = check.firewallBlocked
+    ? "blocked by the Proxmox firewall"
+    : check.firewallActive
+      ? check.firewallAllow === true
+        ? "firewall allows TCP 9443"
+        : check.firewallAllow === false
+          ? "firewall has no TCP 9443 allow rule"
+          : "firewall rule state unknown"
+      : "Proxmox firewall is not active";
+  return `${new Date(check.checkedAt).toLocaleString()}\n${tcp}\n${firewall}\n${check.firewallDetail}`;
+}
+
+function historySummary(history: PraetorHostStatus["history"]): string {
+  if (history.length === 0) return "no checks recorded";
+  const reachable = history.filter((check) => check.tcpReachable).length;
+  const blocked = history.filter((check) => check.firewallBlocked).length;
+  return `${reachable}/${history.length} reachable${blocked > 0 ? ` · ${blocked} blocked` : ""}`;
+}
+
 function normalizeNode(value: string): string {
   return value.trim().toLowerCase().replace(/\.$/, "");
 }
@@ -59,7 +83,7 @@ export function PraetorWorkspace({
   const [busy, setBusy] = useState<string | null>(null);
   const [installingAll, setInstallingAll] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [results, setResults] = useState<Record<string, PraetorInstallResult>>({});
+  const [results, setResults] = useState<Record<string, PraetorRotateResult>>({});
 
   const refresh = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -93,7 +117,7 @@ export function PraetorWorkspace({
             : {
                 ...host,
                 state: result.state,
-                detail: result.ok ? "Egress active on TCP 9443" : result.error || host.detail,
+                detail: result.ok ? "Egress active and TCP 9443 reachable" : result.error || host.detail,
                 endpoint: result.endpoint,
                 publicKey: result.publicKey ?? host.publicKey,
                 profiles: result.profiles.length > 0 ? result.profiles : host.profiles,
@@ -149,6 +173,49 @@ export function PraetorWorkspace({
     [applyResult, onToast, overview?.hosts],
   );
 
+  const runRotate = useCallback(
+    async (hostId: string) => {
+      const label = overview?.hosts.find((host) => host.hostId === hostId)?.label ?? hostId;
+      const confirmed = window.confirm(
+        `Rotate the PRAETOR keypair on ${label}?\n\n` +
+          "The egress restarts with a new X-Wing key. All four pinned client profiles are regenerated on the host and saved locally. Any client still holding the old pin must re-import the profiles. The previous keypair and pins are restored automatically if the egress does not come back.",
+      );
+      if (!confirmed) return;
+      setBusy(hostId);
+      try {
+        const result = await bridge.praetor.rotate(hostId);
+        applyResult(result);
+        if (result.ok) {
+          onToast("ok", `PRAETOR key rotated on ${result.label}`, `${result.profiles.length} pins updated · ${result.endpoint}`);
+        } else {
+          onToast("error", `PRAETOR key rotation failed on ${result.label}`, result.error || result.output.slice(-300));
+        }
+        await refresh(true);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setResults((current) => ({
+          ...current,
+          [hostId]: {
+            hostId,
+            label,
+            ok: false,
+            state: "error",
+            route: "none",
+            endpoint: "",
+            profiles: [],
+            output: message,
+            latencyMs: 0,
+            error: message,
+          },
+        }));
+        onToast("error", "PRAETOR key rotation failed", message);
+      } finally {
+        setBusy(null);
+      }
+    },
+    [applyResult, onToast, overview?.hosts, refresh],
+  );
+
   const hosts = overview?.hosts ?? [];
   const ready = hosts.filter((host) => host.state === "ready").length;
   const profileCount = hosts.reduce((sum, host) => sum + host.profiles.length, 0);
@@ -186,7 +253,7 @@ export function PraetorWorkspace({
         : "";
     const confirmed = window.confirm(
       `Install PRAETOR/1 on ${needsInstall.length} SSH host${needsInstall.length === 1 ? "" : "s"}?\n\n` +
-        "This adds a root systemd service on TCP 9443, writes four client profiles on each host, and downloads a private Node 22 runtime only when the host has no Node 20+." +
+        "This adds a root systemd service on TCP 9443, writes four client profiles on each host, and downloads a private Node 22 runtime only when the host has no Node 20+. Proxmox hosts also get an idempotent host firewall rule; an active firewall that still blocks TCP 9443 fails that host's rollout." +
         pveWarning,
     );
     if (!confirmed) return;
@@ -216,7 +283,8 @@ export function PraetorWorkspace({
           <h2>Every server gets a Praetor exit.</h2>
           <p>
             One rollout writes the egress bundle, per-host X-Wing key, systemd units, firewall allowance and four PRAETOR
-            Command profiles to every configured SSH host. Private keys never leave the server.
+            Command profiles to every configured SSH host. Proxmox host rules are added or validated, and a blocked TCP 9443
+            endpoint fails the rollout. Private keys never leave the server.
           </p>
           <div className="praetor-hero-tags">
             <Chip tone="violet">X-WING</Chip>
@@ -317,6 +385,8 @@ export function PraetorWorkspace({
           <div className="praetor-grid">
             {hosts.map((host) => {
               const result = results[host.hostId];
+              const history = host.history ?? [];
+              const recentChecks = history.slice(-24);
               const cardBusy = busy === host.hostId;
               const canInstall = host.state !== "ready" || !host.profilesOnHost || host.profiles.length === 0;
               return (
@@ -363,34 +433,92 @@ export function PraetorWorkspace({
                       <dt>Runtime</dt>
                       <dd>{host.nodeVersion || "—"}</dd>
                     </div>
+                    <div>
+                      <dt>TCP 9443</dt>
+                      <dd>
+                        {host.tcpReachable
+                          ? `reachable · ${host.tcpLatencyMs ?? "?"} ms`
+                          : host.portListening === false
+                            ? "not listening"
+                            : "unreachable"}
+                      </dd>
+                    </div>
                   </dl>
 
-                  {host.error && host.state !== "ready" ? <p className="praetor-error">{host.error}</p> : null}
+                  <div className="praetor-history">
+                    <div className="praetor-history-head">
+                      <span>Recent checks</span>
+                      <span>{historySummary(recentChecks)}</span>
+                    </div>
+                    {recentChecks.length > 0 ? (
+                      <div
+                        className="praetor-history-strip"
+                        aria-label={`${host.label} recent TCP 9443 and Proxmox firewall checks`}
+                      >
+                        {recentChecks.map((check, index) => (
+                          <span
+                            key={`${check.checkedAt}-${index}`}
+                            className={cx(
+                              "praetor-history-cell",
+                              check.firewallBlocked ? "blocked" : check.tcpReachable ? "reachable" : "failed",
+                            )}
+                            title={historyTitle(check)}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="praetor-history-empty">No checks recorded yet</span>
+                    )}
+                  </div>
+
+                  {host.error && host.state !== "ready" ? (
+                    <p className="praetor-error">{host.firewallBlocked ? host.detail : host.error}</p>
+                  ) : null}
                   {result?.warning ? <p className="praetor-warning">{result.warning}</p> : null}
 
                   <footer>
                     <span className="praetor-detail">{host.detail}</span>
-                    {canManage && canInstall ? (
-                      <button
-                        className="btn small ghost"
-                        disabled={installingAll || busy !== null}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void runInstall(host.hostId);
-                        }}
-                      >
-                        {cardBusy ? "Installing…" : host.state === "outdated" ? "Update" : host.state === "error" ? "Retry" : "Install"}
-                      </button>
-                    ) : (
-                      <span className="praetor-ready-mark">
-                        <Icon name="check" size={12} /> {host.state === "ready" ? "ready" : "read-only"}
-                      </span>
-                    )}
+                    <div className="praetor-card-actions">
+                      {canManage && host.state === "ready" ? (
+                        <button
+                          className="btn small ghost"
+                          disabled={installingAll || busy !== null}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void runRotate(host.hostId);
+                          }}
+                        >
+                          <Icon name="key" size={12} /> {cardBusy ? "Rotating…" : "Rotate key"}
+                        </button>
+                      ) : null}
+                      {canManage && canInstall ? (
+                        <button
+                          className="btn small ghost"
+                          disabled={installingAll || busy !== null}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void runInstall(host.hostId);
+                          }}
+                        >
+                          {cardBusy ? "Installing…" : host.state === "outdated" ? "Update" : host.state === "error" ? "Retry" : "Install"}
+                        </button>
+                      ) : null}
+                      {!canManage ? (
+                        <span className="praetor-ready-mark">
+                          <Icon name="check" size={12} /> {host.state === "ready" ? "ready" : "read-only"}
+                        </span>
+                      ) : null}
+                    </div>
                   </footer>
 
-                  {result && (result.error || result.warning) ? (
+                  {result && (result.error || result.warning || result.oldPublicKey) ? (
                     <details className="praetor-output">
-                      <summary>Installer output</summary>
+                      <summary>{result.oldPublicKey ? "Rotation output" : "Installer output"}</summary>
+                      {result.oldPublicKey ? (
+                        <p className="praetor-warning">
+                          Pin rotated: {shortKey(result.oldPublicKey)} → {shortKey(result.publicKey)}
+                        </p>
+                      ) : null}
                       <pre>{result.output}</pre>
                     </details>
                   ) : null}
@@ -450,6 +578,10 @@ export function PraetorWorkspace({
           <div className="praetor-path" title={overview?.profilesPath ?? ""}>
             <span>Saved locally</span>
             <code>{overview?.profilesPath ?? "—"}</code>
+          </div>
+          <div className="praetor-path" title={overview?.historyPath ?? ""}>
+            <span>Check history</span>
+            <code>{overview?.historyPath ?? "—"}</code>
           </div>
         </Panel>
 

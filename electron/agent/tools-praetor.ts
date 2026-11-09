@@ -4,6 +4,7 @@ import { allProfiles, profilesPath, readHostProfiles } from "../praetor/profiles
 import {
   install as installPraetor,
   overview as praetorOverview,
+  rotate as rotatePraetor,
 } from "../praetor/service";
 import type { PraetorHostStatus, PraetorProfile } from "../../shared/types";
 
@@ -51,6 +52,15 @@ function hostSummary(host: PraetorHostStatus) {
     endpoint: host.endpoint,
     state: host.state,
     detail: host.detail,
+    tcpReachable: host.tcpReachable,
+    tcpLatencyMs: host.tcpLatencyMs ?? null,
+    tcpError: host.tcpError ?? null,
+    portListening: host.portListening,
+    bindAddress: host.bindAddress ?? null,
+    firewallBlocked: host.firewallBlocked,
+    firewallActive: host.firewallActive,
+    firewallAllow: host.firewallAllow,
+    firewallDetail: host.firewallDetail,
     profilesOnHost: host.profilesOnHost,
     profileCount: host.profiles.length,
     nodeVersion: host.nodeVersion ?? null,
@@ -60,6 +70,10 @@ function hostSummary(host: PraetorHostStatus) {
     checkedAt: new Date(host.checkedAt).toISOString(),
     error: host.error ?? null,
     profiles: host.profiles.map(profileSummary),
+    history: host.history.map((check) => ({
+      ...check,
+      checkedAt: new Date(check.checkedAt).toISOString(),
+    })),
   };
 }
 
@@ -71,6 +85,25 @@ function installSummary(result: Awaited<ReturnType<typeof installPraetor>>) {
     state: result.state,
     route: result.route,
     endpoint: result.endpoint,
+    publicKey: result.publicKey ?? null,
+    profileCount: result.profiles.length,
+    profiles: result.profiles.map(profileSummary),
+    latencyMs: result.latencyMs,
+    warning: result.warning ?? null,
+    error: result.error ?? null,
+    output: result.output.slice(-2500),
+  };
+}
+
+function rotateSummary(result: Awaited<ReturnType<typeof rotatePraetor>>) {
+  return {
+    hostId: result.hostId,
+    label: result.label,
+    ok: result.ok,
+    state: result.state,
+    route: result.route,
+    endpoint: result.endpoint,
+    oldPublicKey: result.oldPublicKey ?? null,
     publicKey: result.publicKey ?? null,
     profileCount: result.profiles.length,
     profiles: result.profiles.map(profileSummary),
@@ -109,7 +142,7 @@ export function registerPraetorTools(registry: ToolRegistry): void {
     name: "praetor.overview",
     title: "PRAETOR egress fleet status",
     description:
-      "Read the PRAETOR/1 rollout across every configured SSH host: service state, installed bundle hash, public endpoint, runtime version, X-Wing public key and four client profiles per host. Read-only; private keys are never returned.",
+      "Read the PRAETOR/1 rollout across every configured SSH host: service state, installed bundle hash, public endpoint, runtime version, X-Wing public key and four client profiles per host. The check also opens TCP 9443 from this workstation and inspects Proxmox firewall status and rules, reporting a firewall block separately from a missing listener. Read-only; private keys are never returned.",
     category: "read",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     async run(_args, ctx) {
@@ -117,6 +150,7 @@ export function registerPraetorTools(registry: ToolRegistry): void {
       return {
         expectedSha: overview.expectedSha,
         profilesPath: overview.profilesPath,
+        historyPath: overview.historyPath,
         checkedAt: new Date(overview.checkedAt).toISOString(),
         hosts: overview.hosts.map(hostSummary),
       };
@@ -144,6 +178,8 @@ export function registerPraetorTools(registry: ToolRegistry): void {
           target: `${host.username}@${host.host}:${host.port}`,
           state: host.state,
           profilesOnHost: host.profilesOnHost,
+          tcpReachable: host.tcpReachable,
+          firewallBlocked: host.firewallBlocked,
           detail: host.detail,
           error: host.error ?? null,
         })),
@@ -179,7 +215,7 @@ export function registerPraetorTools(registry: ToolRegistry): void {
     name: "praetor.install",
     title: "Install PRAETOR on a host",
     description:
-      "Stage and install the bundled PRAETOR/1 egress, X-Wing keypair, systemd services, firewall allowance and four client profiles on one SSH host. Destructive and gated: requires confirm:true. The host needs a root route; Proxmox nodes must be present in the SSH inventory.",
+      "Stage and install the bundled PRAETOR/1 egress, X-Wing keypair, systemd services, firewall allowance and four client profiles on one SSH host. On Proxmox it adds or validates an idempotent host-level TCP 9443 rule and fails the rollout if the active firewall still blocks the endpoint. Destructive and gated: requires confirm:true. The host needs a root route; Proxmox nodes must be present in the SSH inventory.",
     category: "destructive",
     inputSchema: {
       type: "object",
@@ -202,10 +238,36 @@ export function registerPraetorTools(registry: ToolRegistry): void {
   });
 
   registry.register({
+    name: "praetor.rotate",
+    title: "Rotate the PRAETOR egress key",
+    description:
+      "Regenerate the X-Wing keypair on one SSH host and update every client pin location: /opt/praetor-egress/profiles.json on the host and the four local PRAETOR Command profiles. The egress restarts with the new key, and the previous keypair and profiles are restored automatically if it does not come back. Clients must re-import the refreshed profiles because their old pin is replaced. Destructive and gated: requires confirm:true. The host needs a root route and an existing install.",
+    category: "destructive",
+    inputSchema: {
+      type: "object",
+      properties: {
+        host: { type: "string", description: "Linux host label, address or id." },
+        confirm: { type: "boolean" },
+      },
+      required: ["host"],
+      additionalProperties: false,
+    },
+    async run(args, ctx) {
+      const id = resolvePraetorHost(ctx, args);
+      await confirmDestructive(ctx, args, {
+        title: `Rotate the PRAETOR key on ${ctx.store.sshHost(id)?.label}`,
+        tool: "praetor.rotate",
+        args: { host: id },
+      });
+      return rotateSummary(await rotatePraetor(ctx.store, id));
+    },
+  });
+
+  registry.register({
     name: "praetor.install_all",
     title: "Install PRAETOR across the fleet",
     description:
-      "Sequentially install or repair PRAETOR/1 on every configured SSH host, or on the hosts named in hosts[]. Each host gets its own egress key, four client profiles, services and firewall allowance. Destructive and gated: requires confirm:true. Nodes missing from SSH inventory are not invented.",
+      "Sequentially install or repair PRAETOR/1 on every configured SSH host, or on the hosts named in hosts[]. Each host gets its own egress key, four client profiles, services and firewall allowance; Proxmox hosts receive an idempotent host-level TCP 9443 rule and fail the rollout when the active firewall still blocks it. Destructive and gated: requires confirm:true. Nodes missing from SSH inventory are not invented.",
     category: "destructive",
     inputSchema: {
       type: "object",

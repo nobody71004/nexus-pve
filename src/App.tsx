@@ -32,6 +32,7 @@ import { LinuxHosts } from "./components/LinuxHosts";
 import { NodeCard } from "./components/NodeCard";
 import { SshServerCard } from "./components/SshServerCard";
 import { PipelineStudio } from "./components/PipelineStudio";
+import { PraetorHealthPanel } from "./components/PraetorHealthPanel";
 import { PraetorWorkspace } from "./components/PraetorWorkspace";
 import { RelayFabric } from "./components/RelayFabric";
 import { TitleBar } from "./components/TitleBar";
@@ -1339,6 +1340,8 @@ function Workspace({
                       </div>
                     </div>
                   </Panel>
+
+                  <PraetorHealthPanel target="cynosure" onOpenPraetor={() => setTab("praetor")} />
 
                   <Panel
                     eyebrow="TASKS"
