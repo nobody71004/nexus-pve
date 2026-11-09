@@ -24,9 +24,15 @@
     "mock:pve": "node scripts/mock-pve.mjs",
     "sync:server": "node scripts/team-sync-server.mjs",
     "smoke": "node scripts/agent-smoke.mjs",
+    "smoke:praetor": "node scripts/praetor-install-smoke.mjs",
+    "smoke:agent-fabric": "node scripts/agent-fabric-smoke.mjs",
+    "smoke:packaged": "node scripts/packaged-smoke.mjs",
+    "verify:packaged": "npm run package:dir && npm run smoke:packaged",
     "test": "node tests/run-edge-tests.mjs",
-    "preflight": "npm run typecheck && npm run build && npm test && npm run smoke",
-    "ui:mock": "vite --port 5173"
+    "preflight": "npm run typecheck && npm run build && npm test && npm run smoke && npm run smoke:agent-fabric",
+    "ui:mock": "vite --port 5173",
+    "preflight:local": "node scripts/local-preflight.mjs",
+    "preflight:local:packaged": "node scripts/local-preflight.mjs --packaged"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
@@ -38,11 +44,11 @@
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
     "cross-env": "^7.0.3",
-    "electron": "33.4.11",
-    "electron-builder": "^25.1.8",
-    "esbuild": "^0.24.2",
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.7.3",
-    "vite": "^6.0.7",
+    "vite": "^6.4.6",
     "wait-on": "^8.0.2"
   },
   "dependencies": {
@@ -89,5 +95,8 @@
     "portable": {
       "unpackDirName": "NexusPVE"
     }
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

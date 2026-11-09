@@ -12,6 +12,10 @@ SSH host:
 - `praetor-ingress.service` / `praetor-ingress-rule.sh` — idempotent TCP 9443
   firewall allowance.
 
+The fallback runtime covers `x86_64`/`amd64` and `aarch64`/`arm64`. The
+installer verifies the matching SHA-256 from the Node distribution before
+extracting it; any other architecture fails with `@@fail=node-arch`.
+
 The two `.mjs` bundles are generated from the `vanta-repo` Praetor source:
 
 ```sh

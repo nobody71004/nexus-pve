@@ -23,8 +23,9 @@ const INGRESS_UNIT = "praetor-ingress.service";
 const INGRESS_SCRIPT = "praetor-ingress-rule.sh";
 const EGRESS_PORT = 9443;
 const NODE_VERSION = "22.11.0";
-const NODE_SHA = "83bf07dd343002a26211cf1fcd46a9d9534219aad42ee02847816940bf610a72";
-const NODE_URL = `https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz`;
+const NODE_DIST = `https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux`;
+const NODE_X64_SHA = "83bf07dd343002a26211cf1fcd46a9d9534219aad42ee02847816940bf610a72";
+const NODE_ARM64_SHA = "6031d04b98f59ff0f7cb98566f65b115ecd893d3b7870821171708cdbaf7ae6e";
 
 let configuredRoot: string | undefined;
 
@@ -102,8 +103,9 @@ STAGE=${shq(stage)}
 PUBLIC_HOST=${shq(pubHost)}
 HOST_ID=${shq(host.id)}
 LABEL=${shq(host.label)}
-NODE_URL=${shq(NODE_URL)}
-NODE_SHA=${shq(NODE_SHA)}
+NODE_DIST=${shq(NODE_DIST)}
+NODE_X64_SHA=${shq(NODE_X64_SHA)}
+NODE_ARM64_SHA=${shq(NODE_ARM64_SHA)}
 mkdir -p "$ROOT"
 
 for FILE in praetor-egress.mjs praetor-keygen.mjs praetor-profiles.mjs praetor-egress.service praetor-ingress.service praetor-ingress-rule.sh; do
@@ -128,11 +130,16 @@ fi
 
 if [ -z "$NODE" ]; then
   ARCH=$(uname -m 2>/dev/null || true)
-  if [ "$ARCH" != "x86_64" ]; then
-    echo "@@fail=node-arch"
-    echo "PRAETOR needs Node 20+ or the bundled Node 22 x64 runtime; this host reports $ARCH." >&2
-    exit 31
-  fi
+  case "$ARCH" in
+    x86_64|amd64) NODE_ARCH=x64; NODE_SHA="$NODE_X64_SHA" ;;
+    aarch64|arm64) NODE_ARCH=arm64; NODE_SHA="$NODE_ARM64_SHA" ;;
+    *)
+      echo "@@fail=node-arch"
+      echo "PRAETOR needs Node 20+ or the bundled Node 22 runtime for x64 or arm64; this host reports $ARCH." >&2
+      exit 31
+      ;;
+  esac
+  NODE_URL="$NODE_DIST-$NODE_ARCH.tar.xz"
   rm -rf "$ROOT/node"
   mkdir -p "$ROOT/node"
   TMP=$(mktemp)

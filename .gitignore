@@ -2,6 +2,7 @@ node_modules/
 dist/
 dist-electron/
 release/
+release-test/
 .asar-inspect/
 artifacts/
 *.log
@@ -9,3 +10,5 @@ artifacts/
 .env.*
 .DS_Store
 Thumbs.db
+.tmp-*
+build/icon-preview.png

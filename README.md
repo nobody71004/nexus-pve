@@ -129,7 +129,7 @@ Download it from the [`v1.0.5` release](https://github.com/nobody71004/nexus-pve
 
 Requirements:
 
-- Node.js 20 or newer
+- Node.js 22 or newer
 - npm
 - Windows for the portable target
 - Python 3.10 or newer for the edge-safety tests and `preflight` (the CI workflow installs 3.12)
@@ -538,7 +538,9 @@ Current coverage:
 - `allow` updates both the config and the `allowed4` set;
 - generated rules evaluate `allowed4` before `blocked4`.
 
-`npm run preflight` runs the typecheck, production build, these tests, and the end-to-end mock/MCP smoke suite. The CI workflow at `.github/workflows/ci.yml` runs the same preflight on Ubuntu with Node 20 and Python 3.12.
+`npm run preflight` runs the typecheck, production build, these tests, and the end-to-end mock/MCP smoke suite. The CI workflow at `.github/workflows/ci.yml` runs the same preflight on Ubuntu with Node 22 and Python 3.12.
+
+`npm run preflight:local` runs the same core checks and both npm audits, then writes a timestamped report with Node/npm/Electron versions and SHA-256 hashes of the build outputs to `artifacts/preflight/latest.json`. It is local evidence only; a release still needs the CI workflow to execute.
 
 ---
 
@@ -588,7 +590,7 @@ The installer supports apt, dnf, yum, pacman, zypper and apk. It prefers sway + 
 
 ### PRAETOR/1 sealed egress
 
-The dedicated **Praetor egress** tab rolls the bundled egress data plane, per-host X-Wing key, systemd units, firewall allowance, and four PRAETOR Command profiles across every configured SSH host. **Install on all** is sequential and reports per-host status; existing host keys are preserved across updates. The installer uses Node 20+ when present, otherwise it verifies and installs a private Node 22 runtime under `/opt/praetor-egress/node`. Profiles use the SSH host or address as the public endpoint and are saved both on the host (`/opt/praetor-egress/profiles.json`) and locally for copy/import. The tab compares discovered Proxmox nodes with the SSH inventory and names any node that still needs an SSH entry before it can be covered. Private keys never leave the server.
+The dedicated **Praetor egress** tab rolls the bundled egress data plane, per-host X-Wing key, systemd units, firewall allowance, and four PRAETOR Command profiles across every configured SSH host. **Install on all** is sequential and reports per-host status; existing host keys are preserved across updates. The installer uses Node 20+ when present, otherwise it verifies and installs a private Node 22 runtime (x64 or arm64) under `/opt/praetor-egress/node`. Profiles use the SSH host or address as the public endpoint and are saved both on the host (`/opt/praetor-egress/profiles.json`) and locally for copy/import. The tab compares discovered Proxmox nodes with the SSH inventory and names any node that still needs an SSH entry before it can be covered. Private keys never leave the server.
 
 MCP clients can inspect the same rollout with `praetor.overview`, `praetor.plan`, and `praetor.profiles`; `praetor.install` and `praetor.install_all` perform the rollout and require `confirm: true`.
 
@@ -652,6 +654,30 @@ The registry covers more than 60 tools across:
 
 Tools are annotated by category. Destructive tools require an explicit confirmation; the MCP server refuses a destructive call without `confirm: true` rather than silently proceeding.
 
+### PRAETOR MCP examples
+
+Each block is one complete line of newline-delimited JSON-RPC. MCP clients perform the `initialize` handshake; these snippets are the `tools/call` requests themselves.
+
+`praetor.overview` is read-only and takes no arguments. It returns the expected bundle hash, profile path, check time, and per-host service state, installed hash, endpoint, public key, and client profiles:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"praetor.overview","arguments":{}}}
+```
+
+`praetor.install_all` is destructive and requires `confirm: true`. Omitting `hosts` targets every configured SSH host; this is the fleet-wide form:
+
+```json
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"praetor.install_all","arguments":{"confirm":true}}}
+```
+
+Pass host labels, addresses, or ids to limit the rollout. Replace the example names with entries from your SSH inventory:
+
+```json
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"praetor.install_all","arguments":{"hosts":["edge-01","edge-02"],"confirm":true}}}
+```
+
+Installs run sequentially and return `total`, `installed`, `failed`, and per-host results. Hosts missing from the SSH inventory are not invented. Run `praetor.plan` first to see which hosts need installation or repair.
+
 ### Built-in pipelines
 
 | Pipeline | Purpose |
@@ -663,6 +689,10 @@ Tools are annotated by category. Destructive tools require an explicit confirmat
 | **Agent dev release gate** | Typecheck, build, and run the end-to-end mock/MCP smoke suite |
 
 Pipelines are defined as JSON in the application data directory. Runs stream step state and logs, support retries and fan-out, and pause at approval gates. A run that is interrupted by an application restart is marked as errored rather than silently resumed.
+
+### OpenAI-compatible tool-calling test
+
+`npm run smoke:agent-fabric` starts a local OpenAI-compatible chat-completions server and acts as the Agent Fabric loop: it advertises the real MCP tool surface to the model, executes the returned calls against the bundled MCP server, and feeds the results back. The scripted model makes two calls (`hosts.list`, then `fleet.overview`) against a mock Proxmox API. It rejects credentials, so the test proves the path needs no API key and no external network.
 
 ### Audit
 
@@ -739,10 +769,11 @@ This separation keeps the desktop responsive and makes the edge data plane indep
 
 ### Requirements
 
-- Node.js 20+
+- Node.js 22+
 - npm
 - Python 3.10+ for `npm test` / `npm run preflight`
 - Windows for the portable target
+- Docker with Linux containers for `npm run smoke:praetor`
 - For the edge: Linux, systemd, nftables, Python 3.10+, and root SSH access
 
 ### Commands
@@ -756,15 +787,24 @@ This separation keeps the desktop responsive and makes the edge data plane indep
 | `npm run build` | Production renderer and main-process bundles |
 | `npm test` | Hermetic edge-safety regression tests |
 | `npm run smoke` | Mock Proxmox/MCP end-to-end checks |
+| `npm run smoke:agent-fabric` | Mock OpenAI-compatible model drives two MCP tool calls; no API key |
+| `npm run smoke:praetor` | Docker-backed MCP test: confirmed PRAETOR install on a disposable SSH host |
+| `npm run smoke:packaged` | Launch the packaged EXE, seed an isolated profile, and verify the renderer plus MCP diagnostics |
+| `npm run verify:packaged` | Build the unpacked Windows package and run the packaged smoke test |
 | `npm run preflight` | Typecheck, build, edge tests, and smoke |
+| `npm run preflight:local` | Same checks plus dependency audits; writes `artifacts/preflight/latest.json` |
 | `npm run package` | Build the portable Windows executable |
 | `npm run mcp` | Run the built MCP server |
 
 The tests use fictional hosts and a mock Proxmox service. They do not contact a live edge.
 
+`npm run smoke:praetor` is an opt-in PRAETOR install integration test. Run it after `npm run build:main`. It builds a disposable Ubuntu systemd container with OpenSSH, seeds an isolated SSH host and temporary Nexus home, then drives the compiled MCP server through a refused and a confirmed `praetor.install_all`. It verifies the egress unit, TCP 9443 listener, key permissions and four client profiles before deleting the container. Docker must be using Linux containers and the fixture needs network access for the Node 22 runtime. If Docker is unavailable the test skips; set `PRAETOR_TEST_REQUIRE_DOCKER=1` to make that a failure in CI.
+
 ### CI
 
-The repository includes `.github/workflows/ci.yml`. It runs on pushes and pull requests with Node 20 and Python 3.12, installs with `npm ci`, and runs `npm run preflight`.
+The repository includes `.github/workflows/ci.yml`. It runs on pushes and pull requests with Node 22 and Python 3.12, installs with `npm ci`, and runs `npm run preflight`.
+
+The Windows release workflow runs `npm run smoke:packaged` after building the portable EXE and before attaching it to a release. The test launches the packaged app against a temporary profile, asserts the seeded workspace and renderer, then probes the packaged MCP server over stdio.
 
 ---
 

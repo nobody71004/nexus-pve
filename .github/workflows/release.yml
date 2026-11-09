@@ -20,7 +20,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
 
       - name: Install dependencies
@@ -32,6 +32,9 @@ jobs:
 
       - name: Build the portable EXE
         run: npm run package
+
+      - name: Smoke-test the packaged EXE
+        run: npm run smoke:packaged
 
       - name: Attach the EXE to the release
         uses: softprops/action-gh-release@v2
