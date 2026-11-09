@@ -1,0 +1,23 @@
+[Unit]
+Description=PRAETOR/1 TCP egress data plane (Nexus PVE managed)
+After=network-online.target praetor-ingress.service
+Wants=network-online.target
+Requires=praetor-ingress.service
+
+[Service]
+Type=simple
+User=root
+Environment=PRAETOR_EGRESS_KEY=/opt/praetor-egress/server.key
+Environment=PRAETOR_EGRESS_HOST=0.0.0.0
+Environment=PRAETOR_EGRESS_PORT=9443
+Environment=PRAETOR_CELL_SIZE=1024
+ExecStart=@NODE@ /opt/praetor-egress/praetor-egress.mjs
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

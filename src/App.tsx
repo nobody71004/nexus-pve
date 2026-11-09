@@ -32,6 +32,7 @@ import { LinuxHosts } from "./components/LinuxHosts";
 import { NodeCard } from "./components/NodeCard";
 import { SshServerCard } from "./components/SshServerCard";
 import { PipelineStudio } from "./components/PipelineStudio";
+import { PraetorWorkspace } from "./components/PraetorWorkspace";
 import { RelayFabric } from "./components/RelayFabric";
 import { TitleBar } from "./components/TitleBar";
 import { Modal, Panel, Skeleton, StatTile, StatusDot, Toasts, type ToastItem } from "./components/ui";
@@ -44,7 +45,7 @@ import { bridge, isMockBridge } from "./lib/bridge";
 import { ago, bytes, clock, cx, pct } from "./lib/format";
 import { helperAlertBreakdown, helperAlertCount, helperFleet, refreshHelpers, subscribeHelpers } from "./lib/helperFleet";
 
-type Tab = "overview" | "hosts" | "network" | "security" | "fabric" | "backups" | "pipelines" | "connections" | "team";
+type Tab = "overview" | "hosts" | "network" | "security" | "fabric" | "praetor" | "backups" | "pipelines" | "connections" | "team";
 
 const NAV: Array<{ id: Tab; label: string; icon: IconName }> = [
   { id: "overview", label: "Fleet overview", icon: "grid" },
@@ -52,6 +53,7 @@ const NAV: Array<{ id: Tab; label: string; icon: IconName }> = [
   { id: "network", label: "Network", icon: "activity" },
   { id: "security", label: "Security guard", icon: "shield" },
   { id: "fabric", label: "Relay fabric", icon: "plug" },
+  { id: "praetor", label: "Praetor egress", icon: "key" },
   { id: "backups", label: "Backup studio", icon: "shield" },
   { id: "pipelines", label: "Agent pipelines", icon: "agent" },
   { id: "connections", label: "Connections", icon: "plug" },
@@ -1041,6 +1043,8 @@ function Workspace({
                       ? "Security guard"
                       : tab === "fabric"
                       ? "Relay fabric"
+                      : tab === "praetor"
+                        ? "Praetor egress"
                       : tab === "backups"
                       ? "Backup studio"
                       : tab === "pipelines"
@@ -1060,6 +1064,8 @@ function Workspace({
                       ? "A 24/7 auditor with layered protections, plus the edge DDoS shield that fronts the game stack."
                       : tab === "fabric"
                       ? "Encrypted multi-hop relay chains: one public entry, private WireGuard hops, and a single origin."
+                      : tab === "praetor"
+                        ? "Roll PRAETOR/1 sealed egress, service units and client profiles to every SSH host, including Proxmox nodes."
                       : tab === "backups"
                       ? "Archives, schedules, restore and verification."
                       : tab === "pipelines"
@@ -1123,6 +1129,13 @@ function Workspace({
             <SecurityWorkspace onToast={notify} onOpenConnections={() => setTab("connections")} />
           ) : tab === "fabric" ? (
             <RelayFabric onToast={notify} onOpenConnections={() => setTab("connections")} />
+          ) : tab === "praetor" ? (
+            <PraetorWorkspace
+              onToast={notify}
+              onOpenHosts={() => setTab("hosts")}
+              pveNodes={fleetNodes.map(({ host, node }) => ({ endpoint: host.label, node: node.node }))}
+              canManage={currentUser.role !== "user"}
+            />
           ) : !activeHostId ? (
             <Panel eyebrow="GET STARTED" title="Connect your first Proxmox endpoint">
               <div className="hero-empty">

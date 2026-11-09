@@ -178,6 +178,11 @@ try {
     "pipeline.approve",
     "pipeline.cancel",
     "audit.tail",
+    "praetor.overview",
+    "praetor.plan",
+    "praetor.profiles",
+    "praetor.install",
+    "praetor.install_all",
   ];
   const missing = required.filter((name) => !names.includes(name));
   check("tool registry exposes the full PVE + dev surface", missing.length === 0, missing.length ? `missing: ${missing.join(", ")}` : `${names.length} tools`);
@@ -192,7 +197,11 @@ try {
   const destructive = (list?.tools ?? []).filter((tool) => tool.annotations?.destructiveHint).map((tool) => tool.name);
   check(
     "destructive tools are annotated",
-    destructive.includes("backup.restore") && destructive.includes("snapshot.rollback") && destructive.length >= 3,
+    destructive.includes("backup.restore") &&
+      destructive.includes("snapshot.rollback") &&
+      destructive.includes("praetor.install") &&
+      destructive.includes("praetor.install_all") &&
+      destructive.length >= 3,
     destructive.join(","),
   );
   check(
@@ -206,6 +215,23 @@ try {
   const hostId = hostList[0]?.id;
   check("hosts.list exposes the headless env host without secrets", hostList.length === 1 && hostList[0].label === "smoke-lab", hostList[0]?.label);
   check("hosts.list never leaks the token secret", !JSON.stringify(hosts.json ?? {}).includes("mock-secret"));
+
+  const praetor = await call("praetor.overview");
+  check(
+    "praetor.overview reads the bundled rollout without SSH hosts",
+    /^[a-f0-9]{64}$/.test(praetor.json?.expectedSha ?? "") && Array.isArray(praetor.json?.hosts) && praetor.json.hosts.length === 0,
+    `${praetor.json?.expectedSha?.slice(0, 12)}…`,
+  );
+  const praetorPlan = await call("praetor.plan");
+  check(
+    "praetor.plan reports an empty fleet without inventing targets",
+    praetorPlan.json?.totalHosts === 0 && (praetorPlan.json?.pending ?? []).length === 0,
+  );
+  const praetorProfiles = await call("praetor.profiles");
+  check(
+    "praetor.profiles reads the local profile store",
+    praetorProfiles.isError === false && praetorProfiles.json?.count === 0 && typeof praetorProfiles.json?.path === "string",
+  );
 
   const overview = await call("fleet.overview", { host: hostId });
   check(

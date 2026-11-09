@@ -158,6 +158,10 @@ const bridge: NexusBridge = {
     open: (hostId: string, port?: number) => ipcRenderer.invoke(IPC.vncOpen, hostId, port),
     close: (sessionId: string) => ipcRenderer.invoke(IPC.vncClose, sessionId),
   },
+  praetor: {
+    overview: () => ipcRenderer.invoke(IPC.praetorOverview),
+    install: (hostId: string) => ipcRenderer.invoke(IPC.praetorInstall, hostId),
+  },
   mcp: {
     status: () => ipcRenderer.invoke(IPC.mcpStatus),
     writeConfig: (target) => ipcRenderer.invoke(IPC.mcpWriteConfig, target),

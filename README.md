@@ -158,6 +158,7 @@ The left navigation is intentionally short:
 | **Linux hosts** | SSH health, helper readiness, filesystem/service visibility, snapshots, journal slices, power/service actions, VNC terminal console |
 | **Network** | Node network interfaces and traffic context |
 | **Security guard** | Baseline posture, drift, scoring, remediation, allowlist/ban controls, hash-chained journal, edge DDoS shield |
+| **Praetor egress** | PRAETOR/1 sealed egress rollout: per-host keys and client profiles, fleet status, install/update, and Proxmox SSH coverage |
 | **Backup studio** | vzdump archives, coverage, manual backups, restore, archive deletion, cluster backup schedules |
 | **Agent pipelines** | Built-in and user-defined multi-step runs, streaming logs, retries, fan-out, approval gates |
 | **Connections** | Proxmox endpoints, Linux/SSH hosts, authentication, TLS verification, MCP client setup |
@@ -570,6 +571,12 @@ Opening the tab on a host with no listener preflights elevation first:
 
 The installer supports apt, dnf, yum, pacman, zypper and apk. It prefers sway + wayvnc + foot on Wayland, falls back to TigerVNC + xterm + openbox, binds the daemon to `127.0.0.1` on the first free port in 5901–5999, and creates a boot-persistent `nexus-vnc-console.service`. Once connected, A− / A+ / A0 send Ctrl+minus, Ctrl+plus and Ctrl+0 to foot. **VNC on all** runs the same idempotent bootstrap across the SSH inventory and leaves existing listeners alone. Proxmox nodes must be present as SSH hosts; an API token alone cannot install packages.
 
+### PRAETOR/1 sealed egress
+
+The dedicated **Praetor egress** tab rolls the bundled egress data plane, per-host X-Wing key, systemd units, firewall allowance, and four PRAETOR Command profiles across every configured SSH host. **Install on all** is sequential and reports per-host status; existing host keys are preserved across updates. The installer uses Node 20+ when present, otherwise it verifies and installs a private Node 22 runtime under `/opt/praetor-egress/node`. Profiles use the SSH host or address as the public endpoint and are saved both on the host (`/opt/praetor-egress/profiles.json`) and locally for copy/import. The tab compares discovered Proxmox nodes with the SSH inventory and names any node that still needs an SSH entry before it can be covered. Private keys never leave the server.
+
+MCP clients can inspect the same rollout with `praetor.overview`, `praetor.plan`, and `praetor.profiles`; `praetor.install` and `praetor.install_all` perform the rollout and require `confirm: true`.
+
 ---
 
 ## Security guardian
@@ -624,6 +631,7 @@ The registry covers more than 60 tools across:
 - Linux/SSH telemetry, journal, services, power, backups, and helper operations;
 - security overview, scanning, policy, enforcement, containment, and journal;
 - DDoS overview, status, rules, install, mode, ban, allow, config, and journal;
+- PRAETOR overview, rollout planning, profile export, per-host install, and fleet install;
 - development build, typecheck, smoke, package, and file tools;
 - pipeline list/run/status/approve/cancel and audit.
 

@@ -42,6 +42,7 @@ import { ddos } from "./ddos/service";
 import type { DdosConfig, DdosMode } from "../shared/ddos-types";
 import { relay } from "./relay/service";
 import { vnc } from "./vnc/service";
+import * as praetor from "./praetor/service";
 import type { RelayChainInput } from "../shared/fabric-types";
 import {
   actOnVm,
@@ -523,6 +524,17 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
   });
   ipcMain.handle(IPC.vncClose, (_event, sessionId: unknown) => vnc.close(str(sessionId, "session id")));
 
+  ipcMain.handle(IPC.praetorOverview, () => {
+    requireOperator();
+    return praetor.overview(store);
+  });
+  ipcMain.handle(IPC.praetorInstall, (_event, hostId: unknown) => {
+    requireOperator();
+    const id = str(hostId, "host id");
+    guardSshHost(id);
+    return praetor.install(store, id);
+  });
+
   ipcMain.handle(IPC.mcpStatus, (): McpStatus => {
     const server = mcpServerPath(app.getAppPath(), app.isPackaged);
     return {
@@ -571,15 +583,26 @@ function mcpServerRoot(): string {
 }
 
 /**
- * A copy of the MCP bundle in the app's own data directory. The portable build
- * extracts itself to a temp folder that disappears on exit, so pointing an MCP
- * client at the bundle inside the install would break the next day.
+ * A copy of the MCP bundle and its resource directory in the app's own data
+ * directory. The portable build extracts itself to a temp folder that
+ * disappears on exit, so pointing an MCP client at the bundle inside the
+ * install would break the next day. The resources must travel with the bundle:
+ * the MCP server resolves PRAETOR, DDoS and helper payloads relative to its own
+ * parent directory.
  */
 function stableMcpServer(): string {
   const source = mcpServerPath(app.getAppPath(), app.isPackaged);
-  const target = path.join(nexusHome(), "mcp", "mcp-server.cjs");
+  const root = nexusHome();
+  const target = path.join(root, "mcp", "mcp-server.cjs");
   fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
   fs.copyFileSync(source, target);
+
+  const bundled = path.join(app.getAppPath(), "resources");
+  const unpacked = bundled.replace(/app\.asar([\\/])/, "app.asar.unpacked$1");
+  const resourceSource = app.isPackaged && fs.existsSync(unpacked) ? unpacked : bundled;
+  const resourceTarget = path.join(root, "resources");
+  fs.rmSync(resourceTarget, { recursive: true, force: true });
+  fs.cpSync(resourceSource, resourceTarget, { recursive: true });
   return target;
 }
 

@@ -54,11 +54,13 @@ function sendError(id: JsonRpcId, code: number, message: string, data?: unknown)
 const INSTRUCTIONS = `Nexus PVE controls Proxmox VE hosts and this app itself.
 
 Read tools: hosts.list, fleet.overview, node.detail, node.rrd, vms.list, vm.detail,
-tasks.list, task.log, backup.list, snapshot.list, pipeline.list, pipeline.status, audit.tail.
+tasks.list, task.log, backup.list, snapshot.list, pipeline.list, pipeline.status, audit.tail,
+praetor.overview, praetor.plan, praetor.profiles.
 
 Mutating tools: vm.action, snapshot.create, backup.run, backup.schedule.save, pipeline.run.
 Destructive tools (require "confirm": true): vm.action for stop/reset/reboot/shutdown,
-snapshot.rollback, snapshot.delete, backup.restore, backup.remove, backup.schedule.delete.
+snapshot.rollback, snapshot.delete, backup.restore, backup.remove, backup.schedule.delete,
+praetor.install, praetor.install_all.
 
 Start a pipeline with pipeline.run { pipeline, host, vars, waitSeconds } (waitSeconds
 caps at 60). Pipelines pause on destructive steps: inspect with pipeline.status, then
@@ -73,6 +75,11 @@ host; security.contain bans an address. security.enforce and security.contain re
 "confirm": true. The guard refuses to ban loopback, link-local or any address holding a
 live SSH session, and refuses a policy file it did not sign.
 Security tools: security.overview, security.scan, security.journal are safe reads/runs.
+PRAETOR egress: praetor.overview, praetor.plan and praetor.profiles are read-only.
+praetor.install pushes the egress, per-host X-Wing key, systemd units, firewall rule and
+four client profiles to one SSH host; praetor.install_all does the same across the fleet.
+Both install tools require "confirm": true. Proxmox nodes need a matching SSH inventory
+entry; the tools never invent one.
 Development tools (dev.tree/read_file/write_file/build/typecheck/smoke/package) operate
 only inside the app directory; writes are backed up under .nexus-backup/.`;
 

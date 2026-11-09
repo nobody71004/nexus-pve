@@ -1,0 +1,533 @@
+.praetor {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.praetor-hero {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 24px 26px;
+  overflow: hidden;
+  border: 1px solid rgba(122, 92, 255, 0.24);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 88% 0%, rgba(92, 255, 177, 0.12), transparent 34%),
+    radial-gradient(circle at 12% 110%, rgba(124, 92, 255, 0.18), transparent 42%),
+    linear-gradient(135deg, rgba(10, 17, 30, 0.94), rgba(7, 11, 20, 0.96));
+}
+
+.praetor-hero::after {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  background: linear-gradient(100deg, transparent 35%, rgba(255, 255, 255, 0.045) 50%, transparent 65%);
+}
+
+.praetor-hero-copy {
+  position: relative;
+  z-index: 1;
+  max-width: 720px;
+}
+
+.praetor-hero h2 {
+  margin: 8px 0;
+  color: var(--text);
+  font-family: var(--display);
+  font-size: clamp(22px, 2.2vw, 32px);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+}
+
+.praetor-hero p {
+  max-width: 680px;
+  margin: 0;
+  color: var(--dim);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.praetor-hero-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.praetor-hero-actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.praetor-stats .stat-tile {
+  min-height: 116px;
+}
+
+.praetor-panel-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.praetor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(292px, 1fr));
+  gap: 12px;
+}
+
+.praetor-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 13px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: linear-gradient(145deg, rgba(18, 26, 42, 0.74), rgba(9, 14, 24, 0.82));
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.praetor-card:hover,
+.praetor-card.active {
+  border-color: rgba(92, 255, 177, 0.32);
+  background: linear-gradient(145deg, rgba(20, 34, 49, 0.82), rgba(9, 15, 26, 0.92));
+}
+
+.praetor-card.active {
+  box-shadow: inset 0 0 0 1px rgba(92, 255, 177, 0.12);
+}
+
+.praetor-card header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.praetor-card-id {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.praetor-card-id > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.praetor-card-id strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.praetor-card-id span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.praetor-orb {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--dim);
+}
+
+.praetor-orb.ready {
+  border-color: rgba(92, 255, 177, 0.3);
+  background: rgba(92, 255, 177, 0.08);
+  color: var(--green);
+}
+
+.praetor-endpoint {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 8px;
+  background: rgba(3, 7, 13, 0.44);
+}
+
+.praetor-endpoint span {
+  color: var(--muted);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+
+.praetor-endpoint code {
+  overflow: hidden;
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.praetor-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.praetor-facts div {
+  min-width: 0;
+}
+
+.praetor-facts dt {
+  margin-bottom: 3px;
+  color: var(--muted);
+  font-size: 8.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.praetor-facts dd {
+  overflow: hidden;
+  margin: 0;
+  color: var(--dim);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.praetor-card footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.praetor-detail {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.praetor-ready-mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  color: var(--green);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.praetor-error,
+.praetor-warning {
+  margin: 0;
+  padding: 7px 8px;
+  border-radius: 6px;
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+
+.praetor-error {
+  background: rgba(255, 76, 106, 0.08);
+  color: var(--red);
+}
+
+.praetor-warning {
+  background: rgba(255, 190, 90, 0.08);
+  color: var(--amber);
+}
+
+.praetor-output {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.praetor-output summary {
+  color: var(--muted);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.praetor-output pre {
+  max-height: 150px;
+  margin: 6px 0 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--dim);
+  font-size: 9px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.praetor-skeletons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.praetor-skeleton {
+  height: 210px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0.025) 20%, rgba(255, 255, 255, 0.05) 45%, rgba(255, 255, 255, 0.025) 70%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s infinite linear;
+}
+
+.praetor-empty {
+  display: flex;
+  align-items: flex-start;
+  gap: 15px;
+  padding: 18px;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+}
+
+.praetor-empty-glyph {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  place-items: center;
+  border-radius: 12px;
+  background: rgba(92, 255, 177, 0.08);
+  color: var(--green);
+}
+
+.praetor-empty h3 {
+  margin: 1px 0 5px;
+  font-size: 14px;
+}
+
+.praetor-empty p {
+  max-width: 620px;
+  margin: 0 0 12px;
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.praetor-lower {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.praetor-panel-copy {
+  margin: 0 0 13px;
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.praetor-panel-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.praetor-profiles {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.praetor-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.praetor-profile > div {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.praetor-profile strong {
+  color: var(--text);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.praetor-profile span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.praetor-profile-mark {
+  width: 7px;
+  height: 28px;
+  flex: 0 0 7px;
+  border-radius: 4px;
+  background: var(--green);
+  box-shadow: 0 0 12px rgba(92, 255, 177, 0.24);
+}
+
+.praetor-profile-mark.violet {
+  background: var(--violet);
+  box-shadow: 0 0 12px rgba(124, 92, 255, 0.24);
+}
+
+.praetor-profile-mark.amber {
+  background: var(--amber);
+  box-shadow: 0 0 12px rgba(255, 190, 90, 0.24);
+}
+
+.praetor-profile-mark.ice {
+  background: #6ed7ff;
+  box-shadow: 0 0 12px rgba(110, 215, 255, 0.24);
+}
+
+.praetor-profile-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.praetor-path {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.praetor-path span {
+  color: var(--muted);
+  font-size: 8.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.praetor-path code {
+  overflow: hidden;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.praetor-coverage-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.praetor-coverage-head strong {
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+}
+
+.praetor-missing {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0 0 13px;
+  padding: 0;
+  list-style: none;
+}
+
+.praetor-missing li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: rgba(255, 190, 90, 0.06);
+  color: var(--amber);
+  font-size: 9.5px;
+}
+
+.praetor-missing li span:last-child {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.praetor-ok-text {
+  margin: 0 0 13px;
+  color: var(--green);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+@media (max-width: 1180px) {
+  .praetor-lower {
+    grid-template-columns: 1fr;
+  }
+
+  .praetor-hero {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .praetor-hero-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 760px) {
+  .praetor-grid,
+  .praetor-skeletons {
+    grid-template-columns: 1fr;
+  }
+}

@@ -14,6 +14,7 @@
     "build": "npm run build:renderer && npm run build:main",
     "build:renderer": "vite build",
     "build:main": "node scripts/build-electron.mjs",
+    "build:praetor": "node scripts/build-praetor-resources.mjs",
     "icon": "node scripts/build-icon.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "start": "npm run build && electron .",
@@ -70,7 +71,8 @@
     "asar": true,
     "npmRebuild": false,
     "asarUnpack": [
-      "dist-electron/mcp-server.cjs"
+      "dist-electron/mcp-server.cjs",
+      "resources/**/*"
     ],
     "win": {
       "icon": "build/icon.ico",

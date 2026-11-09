@@ -1,0 +1,13 @@
+[Unit]
+Description=Allow PRAETOR egress TCP 9443 through the host firewall
+After=network-online.target nexus-shield.service
+Wants=network-online.target
+PartOf=nexus-shield.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/praetor-ingress-rule.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -8,10 +8,12 @@ import { registerPveTools } from "./tools-pve";
 import { registerDevTools } from "./tools-dev";
 import { registerSecurityTools } from "./tools-security";
 import { registerDdosTools } from "./tools-ddos";
+import { registerPraetorTools } from "./tools-praetor";
 import { registerSshTools } from "./tools-ssh";
 import { bindGuardianEmit, guardian } from "../security/guardian";
 import { setHelperAppRoot } from "../ssh/helper";
 import { setDdosAppRoot } from "../ddos/service";
+import { setPraetorAppRoot } from "../praetor/service";
 
 export interface Runtime {
   store: ConfigStore;
@@ -31,6 +33,7 @@ export function createRuntime(appRoot: string, emit: (event: NexusEvent) => void
   registerSshTools(registry);
   registerSecurityTools(registry);
   registerDdosTools(registry);
+  registerPraetorTools(registry);
   registerDevTools(registry);
   registerAuditTools(registry);
   const pipelines = new PipelineService({ store, registry, appRoot, emit });
@@ -40,6 +43,7 @@ export function createRuntime(appRoot: string, emit: (event: NexusEvent) => void
   // The helper installer/version gate needs the same resource directory here.
   setHelperAppRoot(appRoot);
   setDdosAppRoot(appRoot);
+  setPraetorAppRoot(appRoot);
   bindGuardianEmit(emit);
   guardian.start();
 

@@ -28,6 +28,7 @@ import type {
   TeamSyncRunResult,
   TeamSyncStatus,
 } from "./team-sync";
+import type { PraetorInstallResult, PraetorOverview } from "./praetor-types";
 
 export type {
   RelayChain,
@@ -64,6 +65,8 @@ export type {
   DdosSource,
   DdosStatus,
 } from "./ddos-types";
+
+export type { PraetorHostStatus, PraetorInstallResult, PraetorOverview, PraetorProfile, PraetorProfileColor, PraetorState, PraetorSuite } from "./praetor-types";
 
 export type {
   TeamActivityEntry,
@@ -864,6 +867,10 @@ export interface NexusBridge {
     setup(hostId: string, sudoPassword?: string): Promise<VncSetupResult>;
     open(hostId: string, port?: number): Promise<VncSession>;
     close(sessionId: string): Promise<void>;
+  };
+  praetor: {
+    overview(): Promise<PraetorOverview>;
+    install(hostId: string): Promise<PraetorInstallResult>;
   };
   mcp: {
     status(): Promise<McpStatus>;
