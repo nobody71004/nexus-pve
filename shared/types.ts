@@ -7,6 +7,7 @@ import type {
   RelayDeployResult,
   RelayOverview,
   RelayRemoveResult,
+  VncPreflight,
   VncSession,
 } from "./fabric-types";
 import type {
@@ -42,6 +43,7 @@ export type {
   RelayRemoveResult,
   RelayRole,
   RelayTransport,
+  VncPreflight,
   VncSession,
 } from "./fabric-types";
 
@@ -851,6 +853,7 @@ export interface NexusBridge {
     remove(): Promise<RelayRemoveResult>;
   };
   vnc: {
+    preflight(hostId: string): Promise<VncPreflight>;
     open(hostId: string, port?: number): Promise<VncSession>;
     close(sessionId: string): Promise<void>;
   };

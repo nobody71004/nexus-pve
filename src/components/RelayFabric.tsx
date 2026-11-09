@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   RelayChain,
   RelayChainInput,
@@ -24,6 +24,12 @@ const EMPTY: RelayChainInput = {
 };
 
 const ROLE_LABEL = { entry: "Entry", relay: "Relay", exit: "Exit" } as const;
+
+/** Electron wraps rejected IPC handlers twice; show the message the service raised. */
+function readableError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/, "");
+}
 
 function chainToInput(chain: RelayChain): RelayChainInput {
   return {
@@ -67,6 +73,7 @@ export function RelayFabric({
   const [error, setError] = useState<string | null>(null);
   const [outputs, setOutputs] = useState<RelayDeployOutput[]>([]);
   const [tlsReviewed, setTlsReviewed] = useState(false);
+  const originRef = useRef<HTMLInputElement>(null);
 
   const applyOverview = useCallback((next: RelayOverview, preserveDraft: boolean) => {
     setOverview(next);
@@ -146,6 +153,16 @@ export function RelayFabric({
   };
 
   const save = async () => {
+    const origin = draft.originHost.trim();
+    if (!origin || /\s/.test(origin)) {
+      const message = origin
+        ? "Origin host cannot contain spaces."
+        : "Origin host is required: the exit hop forwards traffic to this address.";
+      setError(message);
+      onToast("error", "Relay chain not saved", message);
+      originRef.current?.focus();
+      return;
+    }
     setBusy("save");
     setError(null);
     try {
@@ -154,8 +171,9 @@ export function RelayFabric({
       await load();
       onToast("ok", "Relay chain saved", `${draft.nodes.length} hops · entry :${draft.entryPort}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      onToast("error", "Relay chain not saved", err instanceof Error ? err.message : String(err));
+      const message = readableError(err);
+      setError(message);
+      onToast("error", "Relay chain not saved", message);
     } finally {
       setBusy(null);
     }
@@ -167,7 +185,7 @@ export function RelayFabric({
       await load(true, dirty);
       onToast("ok", "Relay probes complete", "WireGuard + HAProxy state sampled on every hop");
     } catch (err) {
-      onToast("error", "Relay probe failed", err instanceof Error ? err.message : String(err));
+      onToast("error", "Relay probe failed", readableError(err));
     } finally {
       setBusy(null);
     }
@@ -196,7 +214,7 @@ export function RelayFabric({
       }
       await load(true);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = readableError(err);
       setError(message);
       onToast("error", "Relay deployment failed", message);
     } finally {
@@ -213,7 +231,7 @@ export function RelayFabric({
       onToast(result.ok ? "ok" : "warn", result.ok ? "Relay chain stopped" : "Teardown incomplete", result.error);
       await load(true);
     } catch (err) {
-      onToast("error", "Teardown failed", err instanceof Error ? err.message : String(err));
+      onToast("error", "Teardown failed", readableError(err));
     } finally {
       setBusy(null);
     }
@@ -230,7 +248,7 @@ export function RelayFabric({
       }
       onToast(ok === draft.nodes.length ? "ok" : "warn", "Resident bots enabled", `${ok}/${draft.nodes.length} hops active`);
     } catch (err) {
-      onToast("error", "Resident bot failed", err instanceof Error ? err.message : String(err));
+      onToast("error", "Resident bot failed", readableError(err));
     } finally {
       setBusy(null);
     }
@@ -429,8 +447,14 @@ export function RelayFabric({
                 <input type="number" value={draft.relayPort} onChange={(event) => update({ relayPort: Number(event.target.value) || 7444 })} />
               </label>
               <label className="field">
-                <span>Origin host</span>
-                <input value={draft.originHost} onChange={(event) => update({ originHost: event.target.value })} placeholder="10.0.0.20" />
+                <span>Origin host (required)</span>
+                <input
+                  ref={originRef}
+                  value={draft.originHost}
+                  onChange={(event) => update({ originHost: event.target.value })}
+                  placeholder="origin IP or DNS name"
+                  aria-invalid={!draft.originHost.trim()}
+                />
               </label>
               <label className="field">
                 <span>Origin port</span>

@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import RFB from "@novnc/novnc";
-import type { SshHostSummary, VncSession } from "../../shared/types";
+import type { SshHostSummary, VncPreflight, VncSession } from "../../shared/types";
 import { bridge, isMockBridge } from "../lib/bridge";
 import { cx } from "../lib/format";
 import { Icon } from "./Icon";
 
 type VncState = "idle" | "starting" | "connecting" | "connected" | "error";
+
+/** Electron wraps rejected IPC handlers twice; show the message the service raised. */
+function readableError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/, "");
+}
 
 /**
  * A real RFB console inside the renderer. The WebSocket is bound to loopback
@@ -19,7 +25,7 @@ export function VncConsole({
   host: SshHostSummary;
   onToast: (level: "info" | "warn" | "error" | "ok", title: string, detail?: string) => void;
 }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const screenRef = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<RFB | null>(null);
   const sessionRef = useRef<VncSession | null>(null);
   const [state, setState] = useState<VncState>("idle");
@@ -29,6 +35,8 @@ export function VncConsole({
   const passwordRef = useRef("");
   const [showPassword, setShowPassword] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [preflight, setPreflight] = useState<VncPreflight | null>(null);
+  const [preflightState, setPreflightState] = useState<"idle" | "checking" | "done">("idle");
 
   const teardown = useCallback(async () => {
     const rfb = rfbRef.current;
@@ -51,11 +59,54 @@ export function VncConsole({
     }
   }, []);
 
+  // Probe the host before opening the tunnel so the console starts on the port
+  // the daemon actually bound, and surfaces a missing listener instead of a
+  // silent black screen.
+  useEffect(() => {
+    if (isMockBridge) return;
+    let cancelled = false;
+    setPreflightState("checking");
+    setPreflight(null);
+    void bridge.vnc
+      .preflight(host.id)
+      .then((result) => {
+        if (cancelled) return;
+        setPreflight(result);
+        if (result.ok) {
+          setPort((current) => (current === 5900 || current === result.suggestedPort ? result.suggestedPort : current));
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const message = readableError(err);
+        setPreflight({
+          hostId: host.id,
+          host: host.host,
+          checkedAt: Date.now(),
+          latencyMs: 0,
+          ports: [],
+          loopbackPorts: [],
+          exposedPorts: [],
+          suggestedPort: 5900,
+          ok: false,
+          detail: `Preflight could not run: ${message}`,
+          error: message,
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setPreflightState("done");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [host.id, host.host, attempt]);
+
   useEffect(() => {
     if (isMockBridge) {
       setState("idle");
       return;
     }
+    if (preflightState !== "done") return;
     let cancelled = false;
     setState("starting");
     setError(null);
@@ -68,8 +119,8 @@ export function VncConsole({
           return;
         }
         sessionRef.current = session;
-        const target = canvasRef.current;
-        if (!target) throw new Error("VNC canvas is not mounted");
+        const target = screenRef.current;
+        if (!target) throw new Error("VNC screen is not mounted");
         setState("connecting");
         const rfb = new RFB(target, session.wsUrl, {
           credentials: passwordRef.current ? { password: passwordRef.current } : undefined,
@@ -77,7 +128,10 @@ export function VncConsole({
         });
         rfbRef.current = rfb;
         rfb.scaleViewport = true;
-        rfb.resizeSession = true;
+        // Never ask the server to resize its desktop. wayvnc on a headless
+        // wlroots output rejects the custom mode, then stops dispatching: the
+        // socket stays open and reports live while no frames ever arrive.
+        rfb.resizeSession = false;
         rfb.clipViewport = false;
         rfb.showDotCursor = true;
         rfb.background = "#03060c";
@@ -107,7 +161,7 @@ export function VncConsole({
         });
       } catch (err) {
         if (cancelled) return;
-        const message = err instanceof Error ? err.message : String(err);
+        const message = readableError(err);
         setState("error");
         setError(message);
         onToast("error", "VNC session failed", message);
@@ -118,7 +172,7 @@ export function VncConsole({
       cancelled = true;
       void teardown();
     };
-  }, [host.id, port, attempt, onToast, teardown]);
+  }, [host.id, port, attempt, preflightState, onToast, teardown]);
 
   if (isMockBridge) {
     return (
@@ -178,8 +232,22 @@ export function VncConsole({
         </button>
       </div>
 
+      {preflight ? (
+        <div className={cx("vnc-preflight", !preflight.ok && "warn")}>
+          <Icon name={preflight.ok ? "shield" : "alert"} size={12} />
+          <span>{preflight.detail}</span>
+          {preflight.daemon ? <em className="mono">{preflight.daemon}</em> : null}
+        </div>
+      ) : null}
+
       <div className="vnc-screen">
-        <canvas ref={canvasRef} tabIndex={0} aria-label={`VNC console for ${host.label}`} onMouseDown={() => rfbRef.current?.focus()} />
+        <div
+          className="vnc-target"
+          ref={screenRef}
+          tabIndex={0}
+          aria-label={`VNC console for ${host.label}`}
+          onMouseDown={() => rfbRef.current?.focus()}
+        />
         {state !== "connected" ? (
           <div className={cx("vnc-status", state === "error" && "error")}>
             {state === "error" ? <Icon name="alert" size={20} /> : <Icon name="refresh" size={20} className="spin" />}

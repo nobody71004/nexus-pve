@@ -153,6 +153,7 @@ const bridge: NexusBridge = {
     remove: () => ipcRenderer.invoke(IPC.relayRemove),
   },
   vnc: {
+    preflight: (hostId: string) => ipcRenderer.invoke(IPC.vncPreflight, hostId),
     open: (hostId: string, port?: number) => ipcRenderer.invoke(IPC.vncOpen, hostId, port),
     close: (sessionId: string) => ipcRenderer.invoke(IPC.vncClose, sessionId),
   },

@@ -1585,6 +1585,20 @@ export function createMockBridge(): NexusBridge {
       }),
     },
     vnc: {
+      preflight: async (hostId: string) => ({
+        hostId,
+        host: sshHosts.find((entry) => entry.id === hostId)?.host ?? "127.0.0.1",
+        hostname: "mock-host",
+        checkedAt: Date.now(),
+        latencyMs: 12,
+        ports: [5900],
+        loopbackPorts: [5900],
+        exposedPorts: [],
+        suggestedPort: 5900,
+        daemon: "wayvnc",
+        ok: true,
+        detail: "127.0.0.1:5900 (wayvnc) reachable through the SSH tunnel.",
+      }),
       open: async (hostId: string) => ({
         id: `vnc-${Date.now()}`,
         hostId,

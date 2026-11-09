@@ -505,6 +505,11 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
     requireOperator();
     return relay.remove();
   });
+  ipcMain.handle(IPC.vncPreflight, (_event, hostId: unknown) => {
+    const id = str(hostId, "host id");
+    guardSshHost(id);
+    return vnc.preflight(id);
+  });
   ipcMain.handle(IPC.vncOpen, (_event, hostId: unknown, port: unknown) => {
     const id = str(hostId, "host id");
     guardSshHost(id);

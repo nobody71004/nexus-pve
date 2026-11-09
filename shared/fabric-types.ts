@@ -138,3 +138,28 @@ export interface VncSession {
   wsUrl: string;
   expiresAt: number;
 }
+
+/**
+ * Read-only probe of a host's VNC listeners. It never opens a session and keeps
+ * loopback and exposed sockets separate, so the console can pick a safe port.
+ */
+export interface VncPreflight {
+  hostId: string;
+  host: string;
+  hostname?: string;
+  checkedAt: number;
+  latencyMs: number;
+  /** Every port in 5900-5999 with a listening socket. */
+  ports: number[];
+  /** Ports bound to 127.0.0.1/::1, safe for the SSH tunnel. */
+  loopbackPorts: number[];
+  /** Ports bound to a wildcard or public address, reachable beyond loopback. */
+  exposedPorts: number[];
+  /** Port the console should open: loopback first, then wildcard, else 5900. */
+  suggestedPort: number;
+  /** Detected daemon name, e.g. "wayvnc". */
+  daemon?: string;
+  ok: boolean;
+  detail: string;
+  error?: string;
+}
