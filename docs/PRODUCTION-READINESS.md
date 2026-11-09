@@ -1,7 +1,7 @@
 # Production Readiness Roadmap — NexusPVE + PRAETOR/1
 
-**Status:** Phase 0L local toolchain and preflight work completed 2026-11-09;
-source/binary reconciliation, line-ending renormalization, the PRAETOR Rust run
+**Status:** Phase 0L local toolchain, repository normalization, preflight and
+PRAETOR protocol test work completed 2026-11-09; source/binary reconciliation
 and signing/audit procurement remain. Phase 0A remains blocked by the GitHub
 Actions billing issue. This is not a release-ready claim.
 **Date:** 2026-11-09
@@ -16,11 +16,16 @@ may be treated as passed on the basis of a local build alone.
 
 **Phase 0L progress (2026-11-09):** the stale `.github-repo` and `.public-build`
 copies plus debug/generated artifacts were archived under
-`artifacts/cleanup-2026-11-09/`; line-ending policy added; Electron `45.2.3`,
-electron-builder `26.18.0` and esbuild `0.28.2` installed; `npm run
-preflight:local` writes a report; packaged smoke passes 12/12. Runtime audit is
-clean; six moderate build-time `minimatch` findings remain documented in
-`docs/SECURITY-EXCEPTIONS.md`.
+`artifacts/cleanup-2026-11-09/`; line endings were normalized and the work was
+committed as `5bf15d7`; Electron `45.2.3`, electron-builder `26.18.0` and
+esbuild `0.28.2` installed; `npm run preflight:local` passes 7/7 and writes a
+report; packaged smoke passes 12/12. PRAETOR's JavaScript suite passes 59/59 and
+the Rust suite passes 41/41 (6 `bolt`, 4 `fast`, 17 `pmarine`, 9 `roundtrip`,
+5 `vectors`) with Rust 1.99.1 and MSVC 14.51; the cross-language vectors are
+included. Runtime audit is clean; six moderate build-time `minimatch` findings
+remain documented in `docs/SECURITY-EXCEPTIONS.md`. Remaining local work:
+source/binary reconciliation, standalone PRAETOR repo/CI staging,
+`cargo audit`/`cargo deny`, and signing/audit procurement.
 
 ---
 
@@ -75,7 +80,9 @@ These assumptions keep the plan finite. If any are wrong, the scope changes.
 
 ## 2. Baseline: what is actually true today
 
-These are observed facts, not aspirations.
+These are the pre-Phase 0L baseline facts, retained for audit; the status block
+above records what changed locally. They are not a claim that the release gates
+are closed.
 
 ### NexusPVE
 
@@ -139,7 +146,7 @@ verification. Do the local items now; defer only the runner-dependent ones.
    Do not treat a workflow file edit as a fix until a job executes steps.
 2. **One source of truth.** Keep the root `nexus-pve` clone as canonical. Remove
    the stale `.github-repo` nested clone from the workspace and from any scripts.
-   Reconcile the uncommitted smoke-harness and workflow changes, then verify that
+   The smoke-harness and workflow changes are committed in `5bf15d7`; verify that
    tag `v1.0.6` still points at a commit that builds the published EXE. If it does
    not, publish a corrected patch release rather than silently rebuilding.
 3. **Normalize the repository.** Add `.gitattributes` (`* text=auto eol=lf`,
@@ -499,8 +506,9 @@ Do these locally now; they do not require a GitHub runner:
    packaged smoke locally after each change.
 3. Add a local preflight script that runs the same checks as CI and writes a
    timestamped report. This is evidence, not a substitute for a green workflow.
-4. Install the Rust toolchain and run the 34 PRAETOR tests plus cross-language
-   vectors locally; capture the exact toolchain and results.
+4. Install the Rust toolchain and run the 41 PRAETOR tests plus cross-language
+   vectors locally; capture the exact toolchain and results. **Done:** 41/41 pass
+   with Rust 1.99.1/MSVC 14.51; `cargo audit` and `cargo deny` remain.
 5. Initialize the standalone PRAETOR repository locally with its CI workflows
    staged, so it is ready when a remote is available.
 6. Start code-signing and audit procurement; both have external lead times.
@@ -593,8 +601,9 @@ Phase 0A is deferred. This is the local-only starting sequence, in order:
    need CI, but they need explicit approval because they affect existing hosts.
 6. Add Vitest and the first unit tests for vault, config, SSH arguments and IPC
    validation.
-7. Install the Rust toolchain, run the 34 PRAETOR tests and cross-language vectors,
-   then run `cargo audit` and `cargo deny` locally.
+7. Install the Rust toolchain, run the 41 PRAETOR tests and cross-language vectors,
+   then run `cargo audit` and `cargo deny` locally. **Tests: 41/41 pass; audit and
+   deny still open.**
 8. Initialize the standalone PRAETOR repository locally with workflows staged;
    do not create a remote or publish anything yet.
 9. Start code-signing procurement and draft the PRAETOR audit RFP.
