@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="License: GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-2ea44f?style=flat-square" /></a>
   <img alt="Platform: Windows 10/11 x64" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0a84ff?style=flat-square" />
   <img alt="Edge runtime: Python 3.10+ and nftables" src="https://img.shields.io/badge/edge-Python%203.10%2B%20%2B%20nftables-7c5cff?style=flat-square" />
-  <img alt="Version 1.0.5" src="https://img.shields.io/badge/version-1.0.5-3ddc97?style=flat-square" />
+  <img alt="Version 1.0.6" src="https://img.shields.io/badge/version-1.0.6-3ddc97?style=flat-square" />
 </p>
 
 > **Documentation image:** the hero uses documentation addresses from the RFC 5737 ranges. It does not show a live edge address. The project ships with fictional demo data and no credentials, private keys, or real infrastructure addresses.
@@ -73,7 +73,7 @@ The result is a console for a small but real fleet: a Proxmox cluster, a few Lin
 
 | Area | Implementation |
 | --- | --- |
-| Product | Nexus PVE `1.0.5` |
+| Product | Nexus PVE `1.0.6` |
 | Desktop shell | Electron 33, React 18, TypeScript, Vite |
 | Desktop target | Windows 10/11 x64 portable executable |
 | Proxmox access | HTTPS API with token or password authentication, optional TLS verification |
@@ -89,9 +89,24 @@ The result is a console for a small but real fleet: a Proxmox cluster, a few Lin
 
 ### Portable build
 
-Prebuilt portable artifacts are published on the repository's [Releases](../../releases) page. The current build is [`v1.0.5`](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.5).
+Prebuilt portable artifacts are published on the repository's [Releases](../../releases) page. The current build is [`v1.0.6`](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.6).
 
-The portable target is Windows 10/11 x64. It requires no installer and no system Node.js runtime. Verify the download against the SHA-256 in the release notes; a local checkout that includes `NexusPVE-1.0.5-portable.exe` should match the same hash.
+The portable target is Windows 10/11 x64. It requires no installer and no system Node.js runtime. Verify the download against the SHA-256 in the release notes; a local checkout that includes `NexusPVE-1.0.6-portable.exe` should match the same hash.
+
+### Release 1.0.6
+
+`v1.0.6` adds PRAETOR/1 sealed egress and the agent surface for it.
+
+- **Praetor egress workspace** — a dedicated tab rolls the bundled egress data plane, per-host X-Wing key, systemd units, firewall allowance, and four PRAETOR Command profiles across the SSH inventory.
+- **Fleet rollout** — Install on all is sequential, preserves existing host keys, and reports per-host state; Proxmox nodes must be present as SSH hosts before they can be covered.
+- **Agent tools** — `praetor.overview`, `praetor.plan`, `praetor.profiles`, `praetor.install`, and `praetor.install_all`; installs require `confirm: true`.
+- **Packaged MCP** — the MCP bundle and PRAETOR resources are unpacked together so the headless server can read them from a portable install and the stable per-user MCP layout.
+
+| Asset | Size | SHA-256 |
+|---|---|---|
+| `NexusPVE-1.0.6-portable.exe` | 81,426,839 bytes | `befcadb84067a79db5233eeb61b25490949472360b39361f123210490b75409d` |
+
+Download it from the [`v1.0.6` release](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.6).
 
 ### Release 1.0.5
 
@@ -125,7 +140,7 @@ npm run preflight
 npm run package
 ```
 
-Output: `release/NexusPVE-1.0.5-portable.exe`.
+Output: `release/NexusPVE-1.0.6-portable.exe`.
 
 For development:
 
@@ -861,7 +876,7 @@ If you discover a security issue, avoid posting live credentials, hostnames, or 
 - The UI is an operator console, not a multi-tenant control plane. Team roles and per-machine grants are enforced locally, but they are not an SSO provider or an enterprise identity boundary.
 - The embedded noVNC console requires a VNC daemon listening on the host's loopback interface. Nexus can install and start that terminal service automatically on SSH hosts (sway/wayvnc/foot, or TigerVNC/xterm), but never exposes it beyond loopback. Proxmox nodes must be present as SSH hosts for the installer; an API token alone cannot install packages.
 - A host whose SSH account is neither root nor able to use sudo needs a manual root-shell install first; the app can prompt for a sudo password but cannot create sudo rights.
-- The project is version `1.0.5`; review changes and test against a lab before relying on it for production recovery or attack response.
+- The project is version `1.0.6`; review changes and test against a lab before relying on it for production recovery or attack response.
 
 ---
 
