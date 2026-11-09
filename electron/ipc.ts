@@ -600,9 +600,12 @@ function stableMcpServer(): string {
   const bundled = path.join(app.getAppPath(), "resources");
   const unpacked = bundled.replace(/app\.asar([\\/])/, "app.asar.unpacked$1");
   const resourceSource = app.isPackaged && fs.existsSync(unpacked) ? unpacked : bundled;
+  if (!fs.existsSync(resourceSource)) throw new Error(`Bundled MCP resources are missing: ${resourceSource}`);
   const resourceTarget = path.join(root, "resources");
-  fs.rmSync(resourceTarget, { recursive: true, force: true });
-  fs.cpSync(resourceSource, resourceTarget, { recursive: true });
+  if (path.resolve(resourceSource) !== path.resolve(resourceTarget)) {
+    fs.rmSync(resourceTarget, { recursive: true, force: true });
+    fs.cpSync(resourceSource, resourceTarget, { recursive: true });
+  }
   return target;
 }
 
