@@ -81,6 +81,7 @@ export const IPC = {
   vncOpen: "nexus:vnc-open",
   vncClose: "nexus:vnc-close",
   vncPreflight: "nexus:vnc-preflight",
+  vncSetup: "nexus:vnc-setup",
   mcpStatus: "nexus:mcp-status",
   mcpWriteConfig: "nexus:mcp-write-config",
   event: "nexus:event",

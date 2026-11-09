@@ -380,7 +380,7 @@ function installScript(appRoot: string, user: string, helperSha: string, withSud
   return lines.join("\n");
 }
 
-interface ElevationResult {
+export interface ElevationResult {
   ok: boolean;
   route: HelperRoute;
   output: string;
@@ -393,11 +393,12 @@ interface ElevationResult {
  * stdin, so neither the script nor the password ever reaches a remote argv or a
  * shell history: `sudo -S` reads the password from the pipe.
  */
-async function runElevated(
+export async function runElevated(
   store: ConfigStore,
   host: StoredSshHost,
   script: string,
   sudoPassword?: string,
+  options: { timeoutMs?: number } = {},
 ): Promise<ElevationResult> {
   // Two different secrets: the SSH password authenticates the transport, the
   // sudo password feeds `sudo -S`. A key-auth host has no SSH password but may
@@ -432,7 +433,7 @@ async function runElevated(
     'printf "@@exit:%s\\n" "$RC"',
   ].join("\n");
 
-  const result = await runRemote(toRunner(store.publicSshHost(host), 90_000, password), wrapper, "sh");
+  const result = await runRemote(toRunner(store.publicSshHost(host), options.timeoutMs ?? 90_000, password), wrapper, "sh");
   const routeLine = /@@route=(root|nopasswd|password|none)/.exec(result.stdout)?.[1];
   const exitLine = /@@exit:(\d+)/.exec(result.stdout);
   const code = exitLine ? Number(exitLine[1]) : result.code;

@@ -575,6 +575,18 @@ export function ConnectPanel({
                   onChange={(event) => patchSsh({ port: Number(event.target.value) })}
                 />
               </label>
+              <label className="field">
+                <span>VNC port</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={sshEditing.vncPort ?? ""}
+                  onChange={(event) => patchSsh({ vncPort: event.target.value ? Number(event.target.value) : undefined })}
+                  placeholder="auto"
+                />
+                <em className="hint">Pins the loopback RFB port; blank auto-detects.</em>
+              </label>
               <label className="field wide">
                 <span>Authentication</span>
                 <div className="segmented">

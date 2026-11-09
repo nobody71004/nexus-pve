@@ -9,7 +9,8 @@ import type { ConfigStore } from "../config";
 import { configStore } from "../config";
 import { runRemote, sshArgs } from "../ssh/probe";
 import { keyMaterial } from "../ssh/transport";
-import type { VncPreflight, VncSession } from "../../shared/fabric-types";
+import type { VncPreflight, VncSession, VncSetupResult } from "../../shared/fabric-types";
+import { ensureTerminalVnc } from "./setup";
 
 interface ActiveSession {
   public: VncSession;
@@ -42,6 +43,9 @@ const PREFLIGHT_COMMAND = [
   `printf 'hostname=%s\\n' "$(hostname 2>/dev/null || echo unknown)"`,
   `ss -ltnH 2>/dev/null | awk '{print $4}' | grep -E ':(59[0-9]{2})$' | sort -u | sed 's/^/listen=/' || true`,
   `ps -eo args 2>/dev/null | grep -Ei '(x11vnc|wayvnc|Xvnc|tigervnc|vncserver)' | grep -v grep | head -3 | sed 's/^/daemon=/' || true`,
+  // Whether the installer can become root at all. A key-auth host has no
+  // stored password to feed sudo, so the panel can ask before a doomed run.
+  `if [ "$(id -u 2>/dev/null || echo 1)" = 0 ]; then printf 'elevation=root\\n'; elif ! command -v sudo >/dev/null 2>&1; then printf 'elevation=none\\n'; elif sudo -n true >/dev/null 2>&1; then printf 'elevation=nopasswd\\n'; else printf 'elevation=password\\n'; fi`,
   "exit 0",
 ].join("\n");
 
@@ -60,10 +64,12 @@ function parsePreflight(stdout: string): {
   hostname?: string;
   entries: Array<{ address: string; port: number }>;
   daemon?: string;
+  elevation?: string;
 } {
   let hostname: string | undefined;
   const entries: Array<{ address: string; port: number }> = [];
   let daemon: string | undefined;
+  let elevation: string | undefined;
   for (const raw of stdout.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line) continue;
@@ -83,9 +89,12 @@ function parsePreflight(stdout: string): {
         const first = value.split(/\s+/)[0] || value;
         daemon = first.split(/[\\/]/).pop() || first;
       }
+    } else if (line.startsWith("elevation=")) {
+      const value = line.slice("elevation=".length).trim();
+      if (value) elevation = value;
     }
   }
-  return { hostname, entries, daemon };
+  return { hostname, entries, daemon, elevation };
 }
 
 function execCapture(conn: Client, command: string, timeoutMs: number): Promise<string> {
@@ -207,6 +216,10 @@ export class VncService {
   private readonly sessions = new Map<string, ActiveSession>();
 
   constructor(private readonly store: ConfigStore = configStore) {}
+
+  async setup(hostId: string, sudoPassword?: string): Promise<VncSetupResult> {
+    return ensureTerminalVnc(this.store, hostId, sudoPassword);
+  }
 
   async open(hostId: string, rawPort?: number): Promise<VncSession> {
     const host = this.store.sshHost(hostId);
@@ -423,6 +436,10 @@ export class VncService {
         stdout = result.stdout;
       }
       const parsed = parsePreflight(stdout);
+      const elevation: VncPreflight["elevation"] =
+        parsed.elevation === "root" || parsed.elevation === "nopasswd" || parsed.elevation === "password" || parsed.elevation === "none"
+          ? parsed.elevation
+          : "unknown";
       const byPort = new Map<number, string[]>();
       for (const entry of parsed.entries) {
         const addresses = byPort.get(entry.port) ?? [];
@@ -453,6 +470,10 @@ export class VncService {
         exposedPorts,
         suggestedPort,
         daemon: parsed.daemon,
+        elevation,
+        // The stored SSH password doubles as the sudo secret on password-auth
+        // hosts; a key-auth host has nothing to pipe, so it must be typed.
+        needsSudoPassword: !ok && elevation === "password" && host.authMode !== "password",
         ok,
         detail,
       };

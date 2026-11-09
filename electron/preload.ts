@@ -154,6 +154,7 @@ const bridge: NexusBridge = {
   },
   vnc: {
     preflight: (hostId: string) => ipcRenderer.invoke(IPC.vncPreflight, hostId),
+    setup: (hostId: string, sudoPassword?: string) => ipcRenderer.invoke(IPC.vncSetup, hostId, sudoPassword),
     open: (hostId: string, port?: number) => ipcRenderer.invoke(IPC.vncOpen, hostId, port),
     close: (sessionId: string) => ipcRenderer.invoke(IPC.vncClose, sessionId),
   },

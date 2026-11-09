@@ -140,6 +140,31 @@ export interface VncSession {
 }
 
 /**
+ * Result of the one-shot terminal-console bootstrap. The installer creates a
+ * boot-persistent systemd unit on the host, so this can be called repeatedly:
+ * an existing Nexus console is reused and only missing packages are installed.
+ */
+export interface VncSetupResult {
+  hostId: string;
+  ok: boolean;
+  state: "ready" | "installed" | "blocked" | "error";
+  /** Root route used for the package and unit installation. */
+  route: "root" | "nopasswd" | "password" | "none";
+  /** Loopback RFB port the host console is listening on. */
+  port: number;
+  /** wayland = sway/wayvnc/foot, x11 = TigerVNC/xterm fallback. */
+  mode: "wayland" | "x11" | "none";
+  service: string;
+  /** Packages installed by this call; empty when the host was already ready. */
+  packages: string[];
+  output: string;
+  error?: string;
+  /** A one-time sudo password can unlock a host that exposes no root route. */
+  needsSudoPassword?: boolean;
+  latencyMs: number;
+}
+
+/**
  * Read-only probe of a host's VNC listeners. It never opens a session and keeps
  * loopback and exposed sockets separate, so the console can pick a safe port.
  */
@@ -159,6 +184,10 @@ export interface VncPreflight {
   suggestedPort: number;
   /** Detected daemon name, e.g. "wayvnc". */
   daemon?: string;
+  /** How the login account can become root, when the host answered. */
+  elevation?: "root" | "nopasswd" | "password" | "none" | "unknown";
+  /** True when installing needs a sudo password typed into the console panel. */
+  needsSudoPassword?: boolean;
   ok: boolean;
   detail: string;
   error?: string;

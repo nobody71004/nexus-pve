@@ -262,6 +262,10 @@ export class ConfigStore {
     const existing = input.id ? config.sshHosts.find((host) => host.id === input.id) : undefined;
     const id = existing?.id ?? crypto.randomUUID();
     const authMode = input.authMode === "password" ? "password" : "key";
+    const vncPort = input.vncPort === undefined ? existing?.vncPort : Number(input.vncPort);
+    if (vncPort !== undefined && (!Number.isInteger(vncPort) || vncPort < 1 || vncPort > 65535)) {
+      throw new Error("VNC port must be 1-65535");
+    }
     if (authMode === "key" && !input.keyPath?.trim()) {
       // Blank key path is meaningful: ssh falls back to the agent and default keys.
     }
@@ -274,6 +278,7 @@ export class ConfigStore {
       label: input.label?.trim() || hostname,
       host: hostname,
       port,
+      vncPort,
       username,
       authMode,
       keyPath: authMode === "key" ? input.keyPath?.trim() || undefined : undefined,
@@ -298,6 +303,17 @@ export class ConfigStore {
 
   publicSshHost(host: StoredSshHost): SshHostSummary {
     return publicSshHost(host);
+  }
+
+  /** Persist the port chosen by the host-side VNC bootstrap. */
+  setSshHostVncPort(id: string, port: number): boolean {
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("VNC port must be 1-65535");
+    const config = this.read();
+    const host = config.sshHosts.find((entry) => entry.id === id);
+    if (!host) return false;
+    host.vncPort = port;
+    this.write(config);
+    return true;
   }
 
   removeSshHost(id: string): void {

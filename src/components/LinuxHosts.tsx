@@ -151,6 +151,14 @@ export function LinuxHosts({
   const [formError, setFormError] = useState<string | null>(null);
   const speed = useSpeedHistory();
   const [speeding, setSpeeding] = useState(false);
+  const [vncBatch, setVncBatch] = useState<{
+    running: boolean;
+    done: number;
+    total: number;
+    ready: number;
+    needs: number;
+    skipped: number;
+  } | null>(null);
   const [unit, setUnit] = useState("nginx");
   const [confirmKind, setConfirmKind] = useState<"reboot" | "shutdown" | "restart-service" | "stop-service" | "start-service" | "backup" | null>(null);
   const [acting, setActing] = useState(false);
@@ -337,6 +345,7 @@ export function LinuxHosts({
       authMode: host.authMode,
       keyPath: host.keyPath ?? "",
       password: "",
+      vncPort: host.vncPort,
     });
   };
 
@@ -504,6 +513,48 @@ export function LinuxHosts({
     }
   };
 
+  const setupAllVnc = async () => {
+    if (!canManage || vncBatch?.running || hosts.length === 0) return;
+    if (
+      !window.confirm(
+        `Install the loopback terminal console on ${hosts.length} SSH host${hosts.length === 1 ? "" : "s"}? ` +
+          "This may install sway/wayvnc/foot or TigerVNC with root on each host. Existing VNC listeners are left alone.",
+      )
+    ) {
+      return;
+    }
+    const total = hosts.length;
+    let ready = 0;
+    let needs = 0;
+    let skipped = 0;
+    setVncBatch({ running: true, done: 0, total, ready, needs, skipped });
+    for (const host of hosts) {
+      try {
+        const probe = await bridge.vnc.preflight(host.id);
+        if (probe.ok) {
+          ready += 1;
+          skipped += 1;
+        } else {
+          const outcome = await bridge.vnc.setup(host.id);
+          if (outcome.ok) ready += 1;
+          else needs += 1;
+        }
+      } catch {
+        needs += 1;
+      }
+      setVncBatch({ running: true, done: ready + needs + skipped, total, ready, needs, skipped });
+    }
+    setVncBatch({ running: false, done: total, total, ready, needs, skipped });
+    await loadHosts().catch(() => undefined);
+    onToast(
+      needs > 0 ? "warn" : "ok",
+      "VNC fleet setup complete",
+      `${ready}/${total} hosts ready${skipped > 0 ? ` (${skipped} already had a listener)` : ""}${
+        needs > 0 ? ` · ${needs} need a sudo password or manual attention` : ""
+      }`,
+    );
+  };
+
   const act = async () => {
     if (!activeId || !confirmKind) return;
     setActing(true);
@@ -548,6 +599,17 @@ export function LinuxHosts({
           title="Linux hosts"
           actions={
             <div className="inline-actions">
+              {canManage ? (
+                <button
+                  className="btn small ghost"
+                  onClick={() => void setupAllVnc()}
+                  disabled={Boolean(vncBatch?.running) || hosts.length === 0}
+                  title="Install the loopback terminal console on every SSH host, including Proxmox nodes added here. Existing VNC listeners are left alone."
+                >
+                  <Icon name="terminal" size={13} className={vncBatch?.running ? "spin" : ""} />{" "}
+                  {vncBatch?.running ? `VNC ${vncBatch.done}/${vncBatch.total}` : "VNC on all"}
+                </button>
+              ) : null}
               <button className="btn small ghost" onClick={() => void runSpeed()} disabled={speeding || hosts.length === 0}>
                 <Icon name="activity" size={13} className={speeding ? "spin" : ""} /> {speeding ? "Measuring…" : "Speed test all"}
               </button>
@@ -1000,7 +1062,7 @@ export function LinuxHosts({
                 {consoleTab === "cli" ? (
                   <SshTerminal host={activeHost} onToast={onToast} />
                 ) : (
-                  <VncConsole host={activeHost} onToast={onToast} />
+                  <VncConsole host={activeHost} onToast={onToast} canSetup={canManage} />
                 )}
               </Panel>
             ) : null}
@@ -1244,6 +1306,18 @@ export function LinuxHosts({
               <label className="field">
                 <span>Port</span>
                 <input type="number" value={editing.port ?? 22} onChange={(event) => patch({ port: Number(event.target.value) })} />
+              </label>
+              <label className="field">
+                <span>VNC port</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={editing.vncPort ?? ""}
+                  onChange={(event) => patch({ vncPort: event.target.value ? Number(event.target.value) : undefined })}
+                  placeholder="auto"
+                />
+                <em className="hint">Pins the console to a loopback RFB port. Blank keeps the current setting; new hosts auto-detect.</em>
               </label>
               <label className="field wide">
                 <span>Authentication</span>

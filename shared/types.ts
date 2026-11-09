@@ -9,6 +9,7 @@ import type {
   RelayRemoveResult,
   VncPreflight,
   VncSession,
+  VncSetupResult,
 } from "./fabric-types";
 import type {
   TeamAuthState,
@@ -45,6 +46,7 @@ export type {
   RelayTransport,
   VncPreflight,
   VncSession,
+  VncSetupResult,
 } from "./fabric-types";
 
 export type {
@@ -400,6 +402,8 @@ export interface SshHostInput {
   /** Only for authMode "password"; encrypted at rest, never returned. */
   password?: string;
   color?: string;
+  /** Loopback RFB port for the VNC console. Omit to auto-detect at connect time. */
+  vncPort?: number;
 }
 
 export interface SshHostSummary {
@@ -414,6 +418,8 @@ export interface SshHostSummary {
   color: string;
   createdAt: number;
   lastSeenAt?: number;
+  /** Pinned loopback RFB port; absent means detect the daemon on connect. */
+  vncPort?: number;
 }
 
 /** Fleet liveness for one host: an authenticated command, not a full probe. */
@@ -854,6 +860,8 @@ export interface NexusBridge {
   };
   vnc: {
     preflight(hostId: string): Promise<VncPreflight>;
+    /** Installs missing packages and starts the loopback terminal service. */
+    setup(hostId: string, sudoPassword?: string): Promise<VncSetupResult>;
     open(hostId: string, port?: number): Promise<VncSession>;
     close(sessionId: string): Promise<void>;
   };

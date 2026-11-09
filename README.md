@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="License: GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-2ea44f?style=flat-square" /></a>
   <img alt="Platform: Windows 10/11 x64" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0a84ff?style=flat-square" />
   <img alt="Edge runtime: Python 3.10+ and nftables" src="https://img.shields.io/badge/edge-Python%203.10%2B%20%2B%20nftables-7c5cff?style=flat-square" />
-  <img alt="Version 1.0.0" src="https://img.shields.io/badge/version-1.0.0-3ddc97?style=flat-square" />
+  <img alt="Version 1.0.5" src="https://img.shields.io/badge/version-1.0.5-3ddc97?style=flat-square" />
 </p>
 
 > **Documentation image:** the hero uses documentation addresses from the RFC 5737 ranges. It does not show a live edge address. The project ships with fictional demo data and no credentials, private keys, or real infrastructure addresses.
@@ -73,7 +73,7 @@ The result is a console for a small but real fleet: a Proxmox cluster, a few Lin
 
 | Area | Implementation |
 | --- | --- |
-| Product | Nexus PVE `1.0.0` |
+| Product | Nexus PVE `1.0.5` |
 | Desktop shell | Electron 33, React 18, TypeScript, Vite |
 | Desktop target | Windows 10/11 x64 portable executable |
 | Proxmox access | HTTPS API with token or password authentication, optional TLS verification |
@@ -89,9 +89,26 @@ The result is a console for a small but real fleet: a Proxmox cluster, a few Lin
 
 ### Portable build
 
-Prebuilt portable artifacts are published on the repository's [Releases](../../releases) page. If no artifact is attached to the latest release yet, build from source with the commands below.
+Prebuilt portable artifacts are published on the repository's [Releases](../../releases) page. The current build is [`v1.0.5`](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.5).
 
-The portable target is Windows 10/11 x64. It requires no installer and no system Node.js runtime. If you are testing a local checkout that includes `NexusPVE-1.0.0-portable.exe`, compare it with `SHA256SUMS.txt` before running it.
+The portable target is Windows 10/11 x64. It requires no installer and no system Node.js runtime. Verify the download against the SHA-256 in the release notes; a local checkout that includes `NexusPVE-1.0.5-portable.exe` should match the same hash.
+
+### Release 1.0.5
+
+`v1.0.5` is the first release since `v1.0.1`; it collects the Linux console work from 1.0.2–1.0.5.
+
+- **Loopback only** — the VNC daemon binds `127.0.0.1`, and RFB travels through the host's authenticated SSH connection to a loopback WebSocket in the main process. No VNC port is exposed publicly.
+- **Preflight before install** — Nexus checks whether the SSH account is root, has passwordless sudo, or needs a sudo password. A key-only host now asks for the one-time password up front instead of failing an install that cannot succeed.
+- **One-time sudo secret** — every retry path (panel, banner, Enter) reuses the same in-memory secret; it is cleared after a successful install and never written to disk. Password-auth hosts keep using the stored SSH password for sudo.
+- **Accurate failures** — a rejected sudo password and a sudoers policy that requires a TTY produce specific messages instead of the old generic "This host did not allow root".
+- **Terminal stack** — sway + wayvnc + foot on Wayland, with TigerVNC + xterm + openbox as the fallback, installed through apt, dnf, yum, pacman, zypper or apk and started as a boot-persistent `nexus-vnc-console.service` on 5901–5999.
+- **Font controls and fleet rollout** — A− / A+ / A0 send Ctrl+minus, Ctrl+plus and Ctrl+0 to foot; **VNC on all** runs the idempotent bootstrap across the SSH inventory and skips hosts that already have a listener.
+
+| Asset | Size | SHA-256 |
+|---|---|---|
+| `NexusPVE-1.0.5-portable.exe` | 81,380,249 bytes | `d582d27cab8f6c2e1508dd1fbe50488c4a79fddd4762159b37b41b21a9793e79` |
+
+Download it from the [`v1.0.5` release](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.5). Proxmox nodes must be present as SSH hosts for console installation; an API token alone cannot install packages.
 
 ### Build from source
 
@@ -108,7 +125,7 @@ npm run preflight
 npm run package
 ```
 
-Output: `release/NexusPVE-1.0.0-portable.exe`.
+Output: `release/NexusPVE-1.0.5-portable.exe`.
 
 For development:
 
@@ -138,7 +155,7 @@ The left navigation is intentionally short:
 | Screen | What it covers |
 | --- | --- |
 | **Fleet overview** | Fleet KPI tiles, node health, guest inventory, task activity, Linux host dials, RRD history |
-| **Linux hosts** | SSH health, helper readiness, filesystem/service visibility, snapshots, journal slices, power/service actions |
+| **Linux hosts** | SSH health, helper readiness, filesystem/service visibility, snapshots, journal slices, power/service actions, VNC terminal console |
 | **Network** | Node network interfaces and traffic context |
 | **Security guard** | Baseline posture, drift, scoring, remediation, allowlist/ban controls, hash-chained journal, edge DDoS shield |
 | **Backup studio** | vzdump archives, coverage, manual backups, restore, archive deletion, cluster backup schedules |
@@ -540,6 +557,19 @@ The helper is a privileged surface. Review the helper and its sudoers policy bef
 
 The host detail view supports service control, power actions, journal reads, speed tests, and helper operations. Destructive actions go through the same confirmation and audit paths as Proxmox actions.
 
+### VNC terminal console
+
+Each Linux host has a VNC tab beside its SSH terminal. noVNC connects to a WebSocket bound to `127.0.0.1` in the Electron main process, and RFB is forwarded through the host's authenticated SSH connection. The daemon never listens beyond loopback, and no VNC port is exposed publicly.
+
+Opening the tab on a host with no listener preflights elevation first:
+
+- **Root or passwordless sudo** installs and starts the console automatically.
+- **Key-only host with password sudo** asks for the sudo password once, before installing, instead of failing with a generic permission error. The secret is reused by every retry control, kept only in memory, and cleared after success.
+- **Password SSH host** uses the stored SSH password for sudo; no second prompt.
+- **No sudo route** is reported explicitly. A host whose account cannot use sudo needs a manual root-shell install or a sudo grant first.
+
+The installer supports apt, dnf, yum, pacman, zypper and apk. It prefers sway + wayvnc + foot on Wayland, falls back to TigerVNC + xterm + openbox, binds the daemon to `127.0.0.1` on the first free port in 5901–5999, and creates a boot-persistent `nexus-vnc-console.service`. Once connected, A− / A+ / A0 send Ctrl+minus, Ctrl+plus and Ctrl+0 to foot. **VNC on all** runs the same idempotent bootstrap across the SSH inventory and leaves existing listeners alone. Proxmox nodes must be present as SSH hosts; an API token alone cannot install packages.
+
 ---
 
 ## Security guardian
@@ -821,8 +851,9 @@ If you discover a security issue, avoid posting live credentials, hostnames, or 
 - There is no built-in upstream scrubbing, L7 inspection, reputation service, or multi-edge coordination.
 - The edge installer expects a root SSH login and a Debian/Ubuntu-style host for automatic `conntrack-tools` installation.
 - The UI is an operator console, not a multi-tenant control plane. Team roles and per-machine grants are enforced locally, but they are not an SSO provider or an enterprise identity boundary.
-- The embedded noVNC console requires a VNC daemon listening on the host's loopback interface. Nexus provides the SSH-tunneled viewer; it does not install or expose a VNC daemon.
-- The project is version `1.0.0`; review changes and test against a lab before relying on it for production recovery or attack response.
+- The embedded noVNC console requires a VNC daemon listening on the host's loopback interface. Nexus can install and start that terminal service automatically on SSH hosts (sway/wayvnc/foot, or TigerVNC/xterm), but never exposes it beyond loopback. Proxmox nodes must be present as SSH hosts for the installer; an API token alone cannot install packages.
+- A host whose SSH account is neither root nor able to use sudo needs a manual root-shell install first; the app can prompt for a sudo password but cannot create sudo rights.
+- The project is version `1.0.5`; review changes and test against a lab before relying on it for production recovery or attack response.
 
 ---
 

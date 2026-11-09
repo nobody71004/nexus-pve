@@ -510,6 +510,12 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
     guardSshHost(id);
     return vnc.preflight(id);
   });
+  ipcMain.handle(IPC.vncSetup, (_event, hostId: unknown, sudoPassword: unknown) => {
+    const id = str(hostId, "host id");
+    guardSshHost(id);
+    requireOperator();
+    return vnc.setup(id, typeof sudoPassword === "string" ? sudoPassword : undefined);
+  });
   ipcMain.handle(IPC.vncOpen, (_event, hostId: unknown, port: unknown) => {
     const id = str(hostId, "host id");
     guardSshHost(id);

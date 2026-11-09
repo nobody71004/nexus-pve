@@ -4805,6 +4805,43 @@ tr:hover .row-actions {
   width: 120px;
 }
 
+.vnc-text {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(3, 6, 12, 0.55);
+}
+
+.vnc-font {
+  min-width: 27px;
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.vnc-font:hover:not(:disabled) {
+  background: rgba(62, 242, 255, 0.09);
+  color: var(--cyan);
+}
+
+.vnc-font:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.vnc-font.reset {
+  color: var(--dim);
+}
+
 .vnc-screen {
   position: relative;
   min-height: 300px;
@@ -4836,6 +4873,7 @@ tr:hover .row-actions {
   justify-content: center;
   gap: 8px;
   padding: 24px;
+  overflow: auto;
   background: rgba(3, 6, 12, 0.7);
   color: var(--muted);
   text-align: center;
@@ -4899,6 +4937,61 @@ tr:hover .row-actions {
   margin-left: auto;
   font-style: normal;
   color: var(--muted);
+}
+
+.vnc-preflight .btn {
+  flex: 0 0 auto;
+}
+
+.vnc-preflight em + .btn {
+  margin-left: 8px;
+}
+
+.vnc-setup-copy {
+  max-width: 480px;
+  color: var(--dim) !important;
+}
+
+.vnc-setup-error {
+  max-width: 480px;
+  margin: 0;
+  color: var(--amber) !important;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.vnc-setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.vnc-setup-details {
+  width: min(100%, 620px);
+  text-align: left;
+}
+
+.vnc-setup-details summary {
+  color: var(--dim);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.vnc-setup-details pre {
+  max-height: 110px;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(3, 6, 12, 0.7);
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
 }
 
 .vnc-hint {
