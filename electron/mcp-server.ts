@@ -9,7 +9,7 @@ import type { ToolContext } from "./agent/registry";
  * It runs headless and shares the same config/vault as the desktop app, so an
  * agent can drive Proxmox (and build this app) with the window closed.
  */
-const VERSION = "1.0.0";
+const VERSION = "1.0.8";
 const PROTOCOL = "2024-11-05";
 const appRoot = path.resolve(__dirname, "..");
 
@@ -53,7 +53,7 @@ function sendError(id: JsonRpcId, code: number, message: string, data?: unknown)
 
 const INSTRUCTIONS = `Nexus PVE controls Proxmox VE hosts and this app itself.
 
-Read tools: hosts.list, fleet.overview, node.detail, node.rrd, vms.list, vm.detail,
+Read tools: hosts.list, fleet.overview, node.detail, node.rrd, vms.list, vm.detail, sshkey.overview,
 tasks.list, task.log, backup.list, snapshot.list, pipeline.list, pipeline.status, audit.tail,
 praetor.overview, praetor.plan, praetor.profiles.
 
@@ -74,6 +74,13 @@ security.enforce (fixed remediation ids), security.resident and security.policy 
 host; security.contain bans an address. security.enforce and security.contain require
 "confirm": true. The guard refuses to ban loopback, link-local or any address holding a
 live SSH session, and refuses a policy file it did not sign.
+SSH key control plane: sshkey.overview, sshkey.generate, sshkey.deploy, sshkey.scan,
+sshkey.trust and sshkey.policy manage the encrypted Ed25519 vault, per-host
+authorized_keys inventory, trust baseline and 24/7 watcher. Private keys never leave the
+local vault. Deploying appends the public key and points the host at the managed private
+key. sshkey.enforce removes unmanaged keys after a backup, always protects the current
+login key, and refuses if no managed/trusted key would remain. sshkey.enforce and
+sshkey.revoke require "confirm": true; automatic enforcement is opt-in.
 Security tools: security.overview, security.scan, security.journal are safe reads/runs.
 PRAETOR egress: praetor.overview, praetor.plan and praetor.profiles are read-only.
 praetor.install pushes the egress, per-host X-Wing key, systemd units, firewall rule

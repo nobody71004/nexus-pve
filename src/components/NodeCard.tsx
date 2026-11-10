@@ -272,7 +272,7 @@ export function NodeCard({ node, endpoint }: { node: NodeStats; endpoint?: HostS
   });
   const cpuPeak = Math.max(cpu, ...node.rrd.map((point) => point.cpu * 100));
   const memPeak = Math.max(mem, ...node.rrd.map((point) => pct(point.mem, node.memory.total)));
-  const loadPct = node.cores > 0 ? (node.loadavg[0] / node.cores) * 100 : 0;
+  const loadPct = node.threads > 0 ? (node.loadavg[0] / node.threads) * 100 : 0;
   const swapPct = node.swap.total > 0 ? pct(node.swap.used, node.swap.total) : 0;
   const offline = node.status !== "online";
 
@@ -290,7 +290,7 @@ export function NodeCard({ node, endpoint }: { node: NodeStats; endpoint?: HostS
           <div>
             <h3>{node.node}</h3>
             <p title={node.model}>
-              {node.model} · {node.cores} threads
+              {node.model} · {node.cores}C / {node.threads}T
             </p>
           </div>
         </div>
@@ -376,16 +376,38 @@ export function NodeCard({ node, endpoint }: { node: NodeStats; endpoint?: HostS
               </span>
               <MiniBar value={usage} tone={usage > 85 ? "red" : usage > 70 ? "amber" : "cyan"} />
               <span className={cx("mono", usage > 85 && "warn-text")}>{Math.round(usage)}%</span>
-              <span className="mono subtle">{bytes(storage.avail)} free</span>
+              <span className="mono subtle" title={`${bytes(storage.avail)} free`}>
+                {bytes(storage.used)} / {bytes(storage.total)}
+              </span>
             </div>
           );
         })}
         {node.storages.length === 0 ? <span className="subtle">No storage reported (permission or inactive pools)</span> : null}
       </div>
 
+      <div className="node-gpu">
+        <span className="node-gpu-label">
+          <Icon name="cpu" size={12} /> GPU
+        </span>
+        {node.gpus.length > 0 ? (
+          <div className="node-gpu-list">
+            {node.gpus.map((gpu) => (
+              <span key={`${gpu.pci}-${gpu.device}`} title={`${gpu.className}${gpu.iommuGroup !== undefined ? ` · IOMMU ${gpu.iommuGroup}` : ""}`}>
+                <strong>{gpu.name}</strong>
+                <em className="mono">{gpu.pci}</em>
+              </span>
+            ))}
+          </div>
+        ) : (
+          <span className="subtle" title={node.gpuError ?? undefined}>
+            {node.gpuError ? "Unavailable (needs Sys.Audit)" : "None detected"}
+          </span>
+        )}
+      </div>
+
       <div className="node-foot">
         <span>
-          <Icon name="cpu" size={12} /> {node.sockets} socket{node.sockets === 1 ? "" : "s"} @ {node.mhz ? `${node.mhz} MHz` : "—"}
+          <Icon name="cpu" size={12} /> {node.cores}C / {node.threads}T · {node.sockets} socket{node.sockets === 1 ? "" : "s"} @ {node.mhz ? `${node.mhz} MHz` : "—"}
         </span>
         <span>
           <Icon name="disk" size={12} /> {node.disks.length} disk{node.disks.length === 1 ? "" : "s"}

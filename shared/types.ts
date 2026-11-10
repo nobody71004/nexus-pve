@@ -205,12 +205,25 @@ export interface SensorReading {
   unit: string;
 }
 
+export interface GpuInfo {
+  name: string;
+  vendor: string;
+  device: string;
+  /** PCI address, e.g. 0000:41:00.0. */
+  pci: string;
+  className: string;
+  iommuGroup?: number;
+}
+
 export interface NodeStats {
   node: string;
   status: string;
   uptime: number;
   cpu: number;
+  /** Physical cores reported by the node's CPU inventory. */
   cores: number;
+  /** Logical CPUs (hardware threads) reported by the node. */
+  threads: number;
   sockets: number;
   mhz: number;
   model: string;
@@ -223,6 +236,10 @@ export interface NodeStats {
   ksm: { shared: number; sharing: number };
   storages: StorageInfo[];
   disks: DiskInfo[];
+  /** GPU/display controllers discovered from the node PCI inventory. */
+  gpus: GpuInfo[];
+  /** Set only when the PCI inventory could not be read (usually Sys.Audit). */
+  gpuError?: string;
   network: NicInfo[];
   sensors: SensorReading[];
   rrd: RrdPoint[];
@@ -423,6 +440,106 @@ export interface SshHostSummary {
   lastSeenAt?: number;
   /** Pinned loopback RFB port; absent means detect the daemon on connect. */
   vncPort?: number;
+}
+
+/* --------------------------------------------------------------- ssh keys */
+
+export type SshKeyStatus = "active" | "retired";
+export type SshKeyTrust = "managed" | "trusted" | "unknown";
+
+/** Public metadata only. The private half never crosses IPC or MCP. */
+export interface ManagedSshKey {
+  id: string;
+  label: string;
+  owner: string;
+  comment: string;
+  algorithm: "ssh-ed25519";
+  fingerprint: string;
+  publicKey: string;
+  createdAt: number;
+  status: SshKeyStatus;
+  /** Linux host ids this key was deployed to. */
+  hosts: string[];
+  lastDeployedAt?: number;
+}
+
+export interface AuthorizedSshKey {
+  fingerprint: string;
+  type: string;
+  comment: string;
+  publicKey: string;
+  source: SshKeyTrust;
+  keyId?: string;
+  owner?: string;
+  firstSeenAt: number;
+}
+
+export interface SshKeyHostReport {
+  hostId: string;
+  label: string;
+  host: string;
+  username: string;
+  path: string;
+  mode?: string;
+  exists: boolean;
+  scannedAt: number;
+  keys: AuthorizedSshKey[];
+  managed: number;
+  trusted: number;
+  unknown: number;
+  /** Fingerprint of the login key currently configured for this host. */
+  loginFingerprint?: string;
+  error?: string;
+}
+
+export interface SshKeyEvent {
+  at: number;
+  kind: "generate" | "deploy" | "scan" | "trust" | "enforce" | "revoke" | "policy" | "error";
+  hostId?: string;
+  host?: string;
+  ok: boolean;
+  message: string;
+}
+
+export interface SshKeyPolicy {
+  enabled: boolean;
+  intervalSec: number;
+  /** Remove unmanaged keys automatically. Off by default to prevent lockouts. */
+  autoEnforce: boolean;
+  updatedAt: number;
+}
+
+export interface SshKeyOverview {
+  running: boolean;
+  policy: SshKeyPolicy;
+  keys: ManagedSshKey[];
+  hosts: SshKeyHostReport[];
+  events: SshKeyEvent[];
+}
+
+export interface SshKeyGenerateInput {
+  label: string;
+  owner?: string;
+}
+
+export interface SshKeyDeployResult {
+  hostId: string;
+  host: string;
+  keyId: string;
+  fingerprint: string;
+  path: string;
+  mode?: string;
+  added: boolean;
+  output: string;
+}
+
+export interface SshKeyEnforceResult {
+  hostId: string;
+  host: string;
+  removed: string[];
+  kept: number;
+  backup?: string;
+  output: string;
 }
 
 /** Fleet liveness for one host: an authenticated command, not a full probe. */
@@ -732,7 +849,7 @@ export interface AppInfo {
 }
 
 export interface NexusEvent {
-  type: "snapshot" | "pipeline" | "task-log" | "toast" | "host-status" | "security" | "team-sync";
+  type: "snapshot" | "pipeline" | "task-log" | "toast" | "host-status" | "security" | "sshkeys" | "team-sync";
   hostId?: string;
   run?: PipelineRun;
   node?: string;
@@ -742,6 +859,7 @@ export interface NexusEvent {
   message?: string;
   status?: HostRuntimeStatus;
   scan?: SecurityScan;
+  sshKeys?: SshKeyOverview;
   policy?: SecurityPolicy;
   journal?: SecurityJournalEntry;
   teamSync?: TeamSyncStatus;
@@ -829,6 +947,17 @@ export interface NexusBridge {
     helper(hostId: string): Promise<HelperStatus>;
     /** sudoPassword is used once for `sudo -S` and never persisted. */
     installHelper(hostId: string, sudoPassword?: string): Promise<HelperInstallResult>;
+  };
+  sshkeys: {
+    overview(): Promise<SshKeyOverview>;
+    generate(input: SshKeyGenerateInput): Promise<SshKeyOverview>;
+    deploy(hostId: string, keyId: string): Promise<SshKeyDeployResult>;
+    scan(hostId: string): Promise<SshKeyHostReport>;
+    trust(hostId: string, fingerprints?: string[]): Promise<SshKeyHostReport>;
+    enforce(hostId: string, confirm: boolean): Promise<SshKeyEnforceResult>;
+    policy(patch?: Partial<SshKeyPolicy>): Promise<SshKeyPolicy>;
+    revoke(keyId: string, confirm: boolean): Promise<SshKeyOverview>;
+    onChanged(handler: (overview: SshKeyOverview) => void): () => void;
   };
   security: {
     overview(): Promise<SecurityOverview>;

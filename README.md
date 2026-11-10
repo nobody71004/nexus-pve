@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="License: GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-2ea44f?style=flat-square" /></a>
   <img alt="Platform: Windows 10/11 x64" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0a84ff?style=flat-square" />
   <img alt="Edge runtime: Python 3.10+ and nftables" src="https://img.shields.io/badge/edge-Python%203.10%2B%20%2B%20nftables-7c5cff?style=flat-square" />
-  <img alt="Version 1.0.7" src="https://img.shields.io/badge/version-1.0.7-3ddc97?style=flat-square" />
+  <img alt="Version 1.0.8" src="https://img.shields.io/badge/version-1.0.8-3ddc97?style=flat-square" />
 </p>
 
 > **Documentation image:** the hero uses documentation addresses from the RFC 5737 ranges. It does not show a live edge address. The project ships with fictional demo data and no credentials, private keys, or real infrastructure addresses.
@@ -73,11 +73,12 @@ The result is a console for a small but real fleet: a Proxmox cluster, a few Lin
 
 | Area | Implementation |
 | --- | --- |
-| Product | Nexus PVE `1.0.7` |
+| Product | Nexus PVE `1.0.8` |
 | Desktop shell | Electron 33, React 18, TypeScript, Vite |
 | Desktop target | Windows 10/11 x64 portable executable |
 | Proxmox access | HTTPS API with token or password authentication, optional TLS verification |
 | Linux access | SSH keys or stored passwords; systemd, filesystem, service, and security inspection |
+| SSH key control | Encrypted Ed25519 vault, per-host authorized_keys inventory, trust baseline, deploy/revoke, and an opt-in 24/7 enforcement watcher |
 | Edge shield | Python 3.10+ daemon, nftables, conntrack, systemd |
 | Edge control | Root SSH from the app; loopback-only bearer-token API on the edge |
 | Secrets | AES-256-GCM vault in the per-user data directory |
@@ -89,21 +90,21 @@ The result is a console for a small but real fleet: a Proxmox cluster, a few Lin
 
 ### Portable build
 
-Prebuilt portable artifacts are published on the repository's [Releases](../../releases) page. The current build is [`v1.0.7`](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.7).
+Prebuilt portable artifacts are published on the repository's [Releases](../../releases) page. The current build is [`v1.0.8`](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.8).
 
-The portable target is Windows 10/11 x64. It requires no installer and no system Node.js runtime. Verify the download against the SHA-256 in the release notes; a local checkout that includes `NexusPVE-1.0.7-portable.exe` should match the same hash.
+The portable target is Windows 10/11 x64. It requires no installer and no system Node.js runtime. Verify the download against the SHA-256 in the release notes; a local checkout that includes `NexusPVE-1.0.8-portable.exe` should match the same hash.
 
-### Release 1.0.7
+### Release 1.0.8
 
-`v1.0.7` makes PRAETOR egress checks evidence-based and adds transactional per-host key rotation.
+`v1.0.8` adds the SSH-key control plane and makes Proxmox node hardware reporting explicit instead of inferred.
 
-- **Key rotation** — Rotate key on a ready host regenerates its X-Wing keypair, rewrites the four host profiles, saves the new pins locally, and restarts the egress. The previous keypair and profiles are restored if the unit does not stay active; clients must re-import the refreshed pins.
-- **Reachability diagnosis** — `praetor.overview` now opens TCP 9443 from the workstation and distinguishes a missing listener, a loopback-only bind, an upstream timeout, and an active Proxmox firewall without a 9443 allowance. Non-root status checks stay read-only; `sudo -n` is used only for firewall reads.
-- **Bounded history** — Every overview appends a per-host check to `praetor/history.json`, retaining up to 96 probes. The Command Deck adds a single-host PRAETOR health panel with the last 24 checks and a 60-second refresh.
-- **Agent surface** — New `praetor.rotate` tool (requires `confirm: true`) and richer overview evidence, including TCP latency, bind address, firewall status, and retained history.
-- **Test coverage** — A raw stdio PRAETOR example, a two-host disposable Docker fleet test, and smoke coverage for the unconfirmed install gate and active-Proxmox-firewall diagnosis.
+- **SSH key control plane** — Generate Ed25519 keys in the encrypted local vault, deploy only the public half to a host, and switch that host to the managed private key. The **Security → SSH keys** tab shows each account's `authorized_keys`, fingerprints, file mode, managed/trusted/unmanaged classification, and the protected login key.
+- **24/7 watcher and enforcement** — The watcher scans continuously and records a bounded journal. `sshkey.enforce` backs up `authorized_keys`, removes only unmanaged keys, and refuses if no managed or trusted key would remain. Automatic enforcement is explicit opt-in and the configured login key is always protected.
+- **Accurate node hardware** — Node cards and `node.detail` now report physical cores, logical threads, sockets, memory, per-pool storage used/total, physical disk health, and GPUs discovered from Proxmox's PCI inventory. A missing `Sys.Audit` permission is reported as unavailable rather than shown as “no GPU”.
+- **MCP surface** — New `sshkey.overview`, `sshkey.generate`, `sshkey.deploy`, `sshkey.scan`, `sshkey.trust`, `sshkey.policy`, `sshkey.enforce` (gated), and `sshkey.revoke` (gated) tools. Private key material never crosses IPC or MCP.
+- **Verification** — Preflight covers 4 edge tests, 72/72 MCP/PVE checks, 25/25 real-SSH key lifecycle and watcher checks, and 10/10 agent-fabric checks.
 
-The portable asset and its SHA-256 are attached to the [`v1.0.7` release](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.7).
+The portable asset and its SHA-256 are attached to the [`v1.0.8` release](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.8).
 
 ### Release 1.0.6
 
@@ -152,7 +153,7 @@ npm run preflight
 npm run package
 ```
 
-Output: `release/NexusPVE-1.0.7-portable.exe`.
+Output: `release/NexusPVE-1.0.8-portable.exe`.
 
 For development:
 
@@ -963,7 +964,7 @@ If you discover a security issue, avoid posting live credentials, hostnames, or 
 - The UI is an operator console, not a multi-tenant control plane. Team roles and per-machine grants are enforced locally, but they are not an SSO provider or an enterprise identity boundary.
 - The embedded noVNC console requires a VNC daemon listening on the host's loopback interface. Nexus can install and start that terminal service automatically on SSH hosts (sway/wayvnc/foot, or TigerVNC/xterm), but never exposes it beyond loopback. Proxmox nodes must be present as SSH hosts for the installer; an API token alone cannot install packages.
 - A host whose SSH account is neither root nor able to use sudo needs a manual root-shell install first; the app can prompt for a sudo password but cannot create sudo rights.
-- The project is version `1.0.7`; review changes and test against a lab before relying on it for production recovery or attack response.
+- The project is version `1.0.8`; review changes and test against a lab before relying on it for production recovery or attack response.
 
 ---
 

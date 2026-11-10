@@ -1,7 +1,7 @@
 {
   "name": "nexus-pve",
   "productName": "NexusPVE",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Nexus PVE — multi-host Proxmox fleet console with backup studio and an approval-gated agent/MCP pipeline.",
   "private": true,
   "main": "dist-electron/main.cjs",
@@ -28,9 +28,10 @@
     "smoke:praetor:stdio": "node scripts/praetor-stdio-smoke.mjs",
     "smoke:agent-fabric": "node scripts/agent-fabric-smoke.mjs",
     "smoke:packaged": "node scripts/packaged-smoke.mjs",
+    "smoke:sshkeys": "node scripts/sshkey-smoke.mjs",
     "verify:packaged": "npm run package:dir && npm run smoke:packaged",
     "test": "node tests/run-edge-tests.mjs",
-    "preflight": "npm run typecheck && npm run build && npm test && npm run smoke && npm run smoke:agent-fabric",
+    "preflight": "npm run typecheck && npm run build && npm test && npm run smoke && npm run smoke:sshkeys && npm run smoke:agent-fabric",
     "ui:mock": "vite --port 5173",
     "preflight:local": "node scripts/local-preflight.mjs",
     "preflight:local:packaged": "node scripts/local-preflight.mjs --packaged"

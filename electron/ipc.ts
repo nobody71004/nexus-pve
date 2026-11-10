@@ -38,6 +38,7 @@ import {
 import { actOnSshHost, runSpeedTest, runSpeedTestAll } from "./ssh/actions";
 import { checkHelper, installHelper } from "./ssh/helper";
 import { guardian } from "./security/guardian";
+import { sshKeys } from "./sshkeys/service";
 import { ddos } from "./ddos/service";
 import type { DdosConfig, DdosMode } from "../shared/ddos-types";
 import { relay } from "./relay/service";
@@ -286,6 +287,41 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
     });
   });
 
+  ipcMain.handle(IPC.sshKeysOverview, () => {
+    requireOperator();
+    return sshKeys.overview();
+  });
+  ipcMain.handle(IPC.sshKeysGenerate, (_event, input: unknown) => {
+    requireOperator();
+    return sshKeys.generate((input ?? {}) as { label?: unknown; owner?: unknown });
+  });
+  ipcMain.handle(IPC.sshKeysDeploy, (_event, hostId: unknown, keyId: unknown) => {
+    requireOperator();
+    return sshKeys.deploy(str(hostId, "host id"), str(keyId, "key id"));
+  });
+  ipcMain.handle(IPC.sshKeysScan, (_event, hostId: unknown) => {
+    requireOperator();
+    return sshKeys.scan(str(hostId, "host id"));
+  });
+  ipcMain.handle(IPC.sshKeysTrust, (_event, hostId: unknown, fingerprints: unknown) => {
+    requireOperator();
+    return sshKeys.trust(
+      str(hostId, "host id"),
+      Array.isArray(fingerprints) ? fingerprints.filter((entry): entry is string => typeof entry === "string") : undefined,
+    );
+  });
+  ipcMain.handle(IPC.sshKeysEnforce, (_event, hostId: unknown, confirm: unknown) => {
+    requireOperator();
+    return sshKeys.enforce(str(hostId, "host id"), confirm === true);
+  });
+  ipcMain.handle(IPC.sshKeysPolicy, (_event, patch: unknown) => {
+    requireOperator();
+    return sshKeys.setPolicy((patch ?? {}) as Record<string, unknown>);
+  });
+  ipcMain.handle(IPC.sshKeysRevoke, (_event, keyId: unknown, confirm: unknown) => {
+    requireOperator();
+    return sshKeys.revoke(str(keyId, "key id"), confirm === true);
+  });
   ipcMain.handle(IPC.securityOverview, () => {
     requireOperator();
     return guardian.overview();

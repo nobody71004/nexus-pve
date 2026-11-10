@@ -34,6 +34,14 @@ import type {
   SecurityJournalEntry,
   SecurityLayer,
   SecurityPolicy,
+  AuthorizedSshKey,
+  ManagedSshKey,
+  SshKeyDeployResult,
+  SshKeyEnforceResult,
+  SshKeyEvent,
+  SshKeyHostReport,
+  SshKeyOverview,
+  SshKeyPolicy,
   SecurityScan,
   SecuritySeverity,
   SecurityStatus,
@@ -166,6 +174,7 @@ function makeNode(hostId: string, name: string, index: number, diskUsed: number)
     uptime: 86_400 * (hostId === "host-lab" ? 74 + index * 3 : 41),
     cpu,
     cores: hostId === "host-lab" ? 16 : 8,
+    threads: hostId === "host-lab" ? 32 : 16,
     sockets: 1,
     mhz: 2904,
     model: hostId === "host-lab" ? "AMD EPYC 7302P 16-Core Processor" : "AMD Ryzen 9 3900X 12-Core",
@@ -198,6 +207,9 @@ function makeNode(hostId: string, name: string, index: number, diskUsed: number)
         shared: true,
       },
     ],
+    gpus: hostId === "host-lab"
+      ? [{ name: "NVIDIA RTX A4000", vendor: "NVIDIA Corporation", device: "GA104GL [RTX A4000]", pci: "0000:41:00.0", className: "VGA compatible controller", iommuGroup: 22 }]
+      : [],
     disks: [
       {
         dev: "/dev/nvme0n1",
@@ -625,6 +637,102 @@ let sshHosts: SshHostSummary[] = [
     lastSeenAt: Date.now() - 12_000,
   },
 ];
+
+let mockSshKeyPolicy: SshKeyPolicy = {
+  enabled: true,
+  intervalSec: 60,
+  autoEnforce: false,
+  updatedAt: Date.now() - 120_000,
+};
+
+let mockManagedSshKeys: ManagedSshKey[] = [
+  {
+    id: "key-ops-laptop",
+    label: "ops-laptop",
+    owner: "Morgan Lee",
+    comment: "nexus/Morgan-Lee/ops-laptop",
+    algorithm: "ssh-ed25519",
+    fingerprint: "SHA256:8dG4wmLQd3z6XfP8rN2vKc1sYpB7tUaE5hJ0oR9qWxM",
+    publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILlg7H2uPpeDzV8H2mmt/ag0j4fFE2lwfS3MQtkWPla5 nexus/Morgan-Lee/ops-laptop",
+    createdAt: Date.now() - 86_400_000 * 4,
+    status: "active",
+    hosts: ["ssh-edge"],
+    lastDeployedAt: Date.now() - 86_400_000 * 3,
+  },
+];
+
+const mockSshEvents: SshKeyEvent[] = [
+  { at: Date.now() - 58_000, kind: "scan", ok: true, message: "Scanned edge-relay: 1 managed, 1 trusted, 1 unmanaged", hostId: "ssh-edge", host: "edge-relay" },
+  { at: Date.now() - 900_000, kind: "deploy", ok: true, message: "Deployed ops-laptop to edge-relay", hostId: "ssh-edge", host: "edge-relay" },
+];
+
+let mockSshKeyReports: Record<string, SshKeyHostReport> = {};
+
+function mockSshKeyReport(host: SshHostSummary): SshKeyHostReport {
+  const existing = mockSshKeyReports[host.id];
+  if (existing) {
+    existing.label = host.label;
+    existing.host = host.host;
+    existing.username = host.username;
+    return existing;
+  }
+  const managed = mockManagedSshKeys.filter((key) => key.hosts.includes(host.id) && key.status === "active");
+  const keys: AuthorizedSshKey[] = managed.map((key) => ({
+    fingerprint: key.fingerprint,
+    type: "ssh-ed25519",
+    comment: key.comment,
+    publicKey: key.publicKey,
+    source: "managed" as const,
+    keyId: key.id,
+    owner: key.owner,
+    firstSeenAt: key.createdAt,
+  }));
+  if (host.id === "ssh-edge") {
+    keys.push({
+      fingerprint: "SHA256:1Bq7b3vAq0m2hN8sLwErTyUiOpAsDfGhJkLzXcVbNm",
+      type: "ssh-ed25519",
+      comment: "riley@laptop",
+      publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBq7b3vAq0m2hN8sLwErTyUiOpAsDfGhJkLzXcVbNm riley@laptop",
+      source: "trusted" as const,
+      firstSeenAt: Date.now() - 86_400_000 * 12,
+    });
+    keys.push({
+      fingerprint: "SHA256:9Zx8c7v6b5n4m3q2w1e0r9t8y7u6i5o4p3a2s1d0f",
+      type: "ssh-ed25519",
+      comment: "unknown@build-runner",
+      publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI9Zx8c7v6b5n4m3q2w1e0r9t8y7u6i5o4p3a2s1d0f unknown@build-runner",
+      source: "unknown" as const,
+      firstSeenAt: Date.now() - 3_600_000,
+    });
+  }
+  const report: SshKeyHostReport = {
+    hostId: host.id,
+    label: host.label,
+    host: host.host,
+    username: host.username,
+    path: "~/.ssh/authorized_keys",
+    mode: "600",
+    exists: host.id === "ssh-edge",
+    scannedAt: host.id === "ssh-edge" ? Date.now() - 58_000 : 0,
+    keys,
+    managed: keys.filter((key) => key.source === "managed").length,
+    trusted: keys.filter((key) => key.source === "trusted").length,
+    unknown: keys.filter((key) => key.source === "unknown").length,
+    loginFingerprint: managed[0]?.fingerprint,
+  };
+  mockSshKeyReports[host.id] = report;
+  return report;
+}
+
+function mockSshKeyOverview(): SshKeyOverview {
+  return {
+    running: mockSshKeyPolicy.enabled,
+    policy: mockSshKeyPolicy,
+    keys: [...mockManagedSshKeys],
+    hosts: sshHosts.map(mockSshKeyReport),
+    events: [...mockSshEvents],
+  };
+}
 
 const mockTeamNow = Date.now();
 const mockAdmin: TeamUser = {
@@ -1572,6 +1680,130 @@ export function createMockBridge(): NexusBridge {
           output: `helper=installed\nsudoers=installed\nvisudo: parsed OK\n@@done`,
           status,
         };
+      },
+    },
+    sshkeys: {
+      overview: async () => mockSshKeyOverview(),
+      generate: async (input) => {
+        const now = Date.now();
+        const id = `key-${now}`;
+        const key: ManagedSshKey = {
+          id,
+          label: input.label,
+          owner: input.owner || "operator",
+          comment: `nexus/${(input.owner || "operator").replace(/\s+/g, "-")}/${input.label.replace(/\s+/g, "-")}`,
+          algorithm: "ssh-ed25519",
+          fingerprint: `SHA256:mock-${id}`,
+          publicKey: `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILlg7H2uPpeDzV8H2mmt/ag0j4fFE2lwfS3MQtkWPla5 ${id}`,
+          createdAt: now,
+          status: "active",
+          hosts: [],
+        };
+        mockManagedSshKeys = [key, ...mockManagedSshKeys];
+        mockSshEvents.unshift({ at: now, kind: "generate", ok: true, message: `Generated ${key.label} for ${key.owner}` });
+        const overview = mockSshKeyOverview();
+        emit({ type: "sshkeys", sshKeys: overview });
+        return overview;
+      },
+      deploy: async (hostId, keyId): Promise<SshKeyDeployResult> => {
+        const key = mockManagedSshKeys.find((entry) => entry.id === keyId);
+        const host = sshHosts.find((entry) => entry.id === hostId);
+        if (!key || !host) throw new Error("Unknown SSH key or host");
+        key.hosts = [...new Set([...key.hosts, hostId])];
+        key.lastDeployedAt = Date.now();
+        key.status = "active";
+        const report = mockSshKeyReport(host);
+        if (!report.keys.some((entry) => entry.fingerprint === key.fingerprint)) {
+          report.keys.push({
+            fingerprint: key.fingerprint,
+            type: key.algorithm,
+            comment: key.comment,
+            publicKey: key.publicKey,
+            source: "managed",
+            keyId: key.id,
+            owner: key.owner,
+            firstSeenAt: Date.now(),
+          });
+          report.exists = true;
+          report.mode = "600";
+          report.managed += 1;
+        }
+        report.scannedAt = Date.now();
+        mockSshEvents.unshift({ at: Date.now(), kind: "deploy", ok: true, message: `Deployed ${key.label} to ${host.label}`, hostId, host: host.label });
+        const overview = mockSshKeyOverview();
+        emit({ type: "sshkeys", sshKeys: overview });
+        return {
+          hostId,
+          host: host.label,
+          keyId,
+          fingerprint: key.fingerprint,
+          path: report.path,
+          mode: "600",
+          added: true,
+          output: `state=added\npath=${report.path}\nmode=600`,
+        };
+      },
+      scan: async (hostId) => {
+        const host = sshHosts.find((entry) => entry.id === hostId);
+        if (!host) throw new Error("Unknown SSH host");
+        const report = mockSshKeyReport(host);
+        report.scannedAt = Date.now();
+        report.exists = true;
+        report.mode = report.mode ?? "600";
+        mockSshEvents.unshift({ at: Date.now(), kind: "scan", ok: true, message: `Scanned ${host.label}: ${report.managed} managed, ${report.trusted} trusted, ${report.unknown} unmanaged`, hostId, host: host.label });
+        emit({ type: "sshkeys", sshKeys: mockSshKeyOverview() });
+        return report;
+      },
+      trust: async (hostId) => {
+        const host = sshHosts.find((entry) => entry.id === hostId);
+        if (!host) throw new Error("Unknown SSH host");
+        const report = mockSshKeyReport(host);
+        report.keys = report.keys.map((key) => (key.source === "unknown" ? { ...key, source: "trusted" as const } : key));
+        report.unknown = 0;
+        report.trusted = report.keys.filter((key) => key.source === "trusted").length;
+        report.scannedAt = Date.now();
+        mockSshEvents.unshift({ at: Date.now(), kind: "trust", ok: true, message: `Trusted unmanaged keys on ${host.label}`, hostId, host: host.label });
+        emit({ type: "sshkeys", sshKeys: mockSshKeyOverview() });
+        return report;
+      },
+      enforce: async (hostId): Promise<SshKeyEnforceResult> => {
+        const host = sshHosts.find((entry) => entry.id === hostId);
+        if (!host) throw new Error("Unknown SSH host");
+        const report = mockSshKeyReport(host);
+        const removed = report.keys.filter((key) => key.source === "unknown").map((key) => key.fingerprint);
+        report.keys = report.keys.filter((key) => key.source !== "unknown");
+        report.unknown = 0;
+        report.scannedAt = Date.now();
+        mockSshEvents.unshift({ at: Date.now(), kind: "enforce", ok: true, message: `Removed ${removed.length} unmanaged key(s) from ${host.label}`, hostId, host: host.label });
+        emit({ type: "sshkeys", sshKeys: mockSshKeyOverview() });
+        return { hostId, host: host.label, removed, kept: report.keys.length, backup: `${report.path}.nexus-mock.bak`, output: `removed=${removed.length}\nkept=${report.keys.length}` };
+      },
+      policy: async (patch) => {
+        mockSshKeyPolicy = { ...mockSshKeyPolicy, ...patch, updatedAt: Date.now() };
+        mockSshEvents.unshift({ at: Date.now(), kind: "policy", ok: true, message: `Policy updated: auto-enforce ${mockSshKeyPolicy.autoEnforce ? "on" : "off"}` });
+        emit({ type: "sshkeys", sshKeys: mockSshKeyOverview() });
+        return mockSshKeyPolicy;
+      },
+      revoke: async (keyId) => {
+        const key = mockManagedSshKeys.find((entry) => entry.id === keyId);
+        if (!key) throw new Error("Unknown SSH key");
+        key.status = "retired";
+        key.hosts = [];
+        for (const report of Object.values(mockSshKeyReports)) {
+          report.keys = report.keys.filter((entry) => entry.keyId !== key.id);
+          report.managed = report.keys.filter((entry) => entry.source === "managed").length;
+        }
+        mockSshEvents.unshift({ at: Date.now(), kind: "revoke", ok: true, message: `Revoked ${key.label}` });
+        const overview = mockSshKeyOverview();
+        emit({ type: "sshkeys", sshKeys: overview });
+        return overview;
+      },
+      onChanged: (handler) => {
+        const listener = (event: NexusEvent) => {
+          if (event.type === "sshkeys" && event.sshKeys) handler(event.sshKeys);
+        };
+        listeners.add(listener);
+        return () => listeners.delete(listener);
       },
     },
     security: {

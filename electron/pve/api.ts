@@ -4,6 +4,7 @@ import type {
   BackupArchive,
   ClusterBackupJob,
   DiskInfo,
+  GpuInfo,
   NicInfo,
   NodeStats,
   RrdPoint,
@@ -112,7 +113,7 @@ export async function fetchNodes(client: PveClient): Promise<RawNode[]> {
 
 export async function fetchNodeStats(client: PveClient, node: string, summary?: RawNode): Promise<NodeStats> {
   const started = Date.now();
-  const [status, rrd, storages, disks, network, sensors] = await Promise.allSettled([
+  const [status, rrd, storages, disks, network, sensors, pci] = await Promise.allSettled([
     client.get<RawNodeStatus>(`/nodes/${enc(node)}/status`),
     client.get<Record<string, number | string | null>[]>(`/nodes/${enc(node)}/rrddata`, {
       timeframe: "hour",
@@ -122,6 +123,7 @@ export async function fetchNodeStats(client: PveClient, node: string, summary?: 
     client.get<Record<string, unknown>[]>(`/nodes/${enc(node)}/disks/list`),
     client.get<Record<string, unknown>[]>(`/nodes/${enc(node)}/network`),
     client.get<Record<string, unknown[]>>(`/nodes/${enc(node)}/sensors`),
+    client.get<Record<string, unknown>[]>(`/nodes/${enc(node)}/hardware/pci`, { verbose: 1 }),
   ]);
 
   const value = <T,>(result: PromiseSettledResult<T>, fallback: T): T =>
@@ -134,14 +136,26 @@ export async function fetchNodeStats(client: PveClient, node: string, summary?: 
   // back to the cluster view so the console still shows something truthful.
   const memoryTotal = s.memory?.total ?? summary?.maxmem ?? 0;
   const memoryUsed = s.memory?.used ?? summary?.mem ?? 0;
+  const reportedCores = Number(s.cpuinfo?.cores ?? summary?.maxcpu ?? 1);
+  const cores = Number.isFinite(reportedCores) && reportedCores > 0 ? Math.round(reportedCores) : 1;
+  const reportedThreads = Number(s.cpuinfo?.cpus ?? summary?.maxcpu ?? cores);
+  const threads = Number.isFinite(reportedThreads) && reportedThreads >= cores ? Math.round(reportedThreads) : cores;
+  const reportedSockets = Number(s.cpuinfo?.sockets ?? 1);
+  const sockets = Number.isFinite(reportedSockets) && reportedSockets > 0 ? Math.round(reportedSockets) : 1;
+  const gpus = pci.status === "fulfilled" ? value(pci, []).map(normalizeGpu).filter((gpu) => gpu !== null) : [];
+  const gpuError =
+    pci.status === "rejected"
+      ? `PCI inventory unavailable: ${pci.reason instanceof Error ? pci.reason.message : String(pci.reason)}`
+      : undefined;
 
   return {
     node,
     status: summary?.status ?? "unknown",
     uptime: s.uptime ?? summary?.uptime ?? 0,
     cpu: summary?.cpu ?? 0,
-    cores: s.cpuinfo?.cores ?? summary?.maxcpu ?? 1,
-    sockets: s.cpuinfo?.sockets ?? 1,
+    cores,
+    threads,
+    sockets,
     mhz: Number(s.cpuinfo?.mhz ?? 0),
     model: s.cpuinfo?.model ?? "CPU model unavailable",
     kernel: s["current-kernel"]?.version ?? "",
@@ -157,6 +171,8 @@ export async function fetchNodeStats(client: PveClient, node: string, summary?: 
     ksm: { shared: s.ksm?.shared ?? 0, sharing: s.ksm?.sharing ?? 0 },
     storages: value(storages, []).map(normalizeStorage),
     disks: value(disks, []).map(normalizeDisk),
+    gpus,
+    ...(gpuError ? { gpuError } : {}),
     network: value(network, []).map(normalizeNic),
     sensors: flattenSensors(value(sensors, {})),
     rrd: points.map(normalizeRrdPoint).filter((p) => p.t > 0),
@@ -191,6 +207,27 @@ function normalizeDisk(raw: Record<string, unknown>): DiskInfo {
     type: String(raw.type ?? ""),
     used: raw.used ? String(raw.used) : undefined,
     wearout: raw.wearout !== undefined ? Number(raw.wearout) : undefined,
+  };
+}
+
+const GPU_CLASS_IDS = new Set(["030000", "030200", "038000"]);
+
+/** PVE returns PCI classes as hex ids plus human-readable names, depending on version. */
+function normalizeGpu(raw: Record<string, unknown>): GpuInfo | null {
+  const classId = String(raw.class ?? raw.classid ?? "").toLowerCase().replace(/^0x/, "");
+  const className = String(raw.class_name ?? raw.classname ?? raw.class ?? "");
+  const isGpu = GPU_CLASS_IDS.has(classId) || /vga|3d controller|display controller/i.test(className);
+  if (!isGpu) return null;
+  const vendor = String(raw.vendor_name ?? raw.vendorname ?? raw.vendor ?? "") || "Unknown vendor";
+  const device = String(raw.device_name ?? raw.devicename ?? raw.device ?? "") || "Display controller";
+  const iommu = Number(raw.iommugroup ?? raw.iommu_group);
+  return {
+    name: `${vendor} ${device}`.replace(/\s+/g, " ").trim(),
+    vendor,
+    device,
+    pci: String(raw.id ?? raw.pci ?? ""),
+    className,
+    ...(Number.isFinite(iommu) && iommu >= 0 ? { iommuGroup: iommu } : {}),
   };
 }
 

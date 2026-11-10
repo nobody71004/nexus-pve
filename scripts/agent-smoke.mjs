@@ -319,6 +319,14 @@ try {
     "praetor.install",
     "praetor.install_all",
     "praetor.rotate",
+    "sshkey.overview",
+    "sshkey.generate",
+    "sshkey.deploy",
+    "sshkey.scan",
+    "sshkey.trust",
+    "sshkey.enforce",
+    "sshkey.policy",
+    "sshkey.revoke",
   ];
   const missing = required.filter((name) => !names.includes(name));
   check("tool registry exposes the full PVE + dev surface", missing.length === 0, missing.length ? `missing: ${missing.join(", ")}` : `${names.length} tools`);
@@ -566,6 +574,8 @@ try {
 
   const node = await call("node.detail", { host: hostId, node: "pve-smoke" });
   check("node.detail returns CPU model + kernel + PVE version", /EPYC/.test(node.json?.cpuModel ?? "") && !!node.json?.kernel && !!node.json?.pveVersion);
+  check("node.detail reports physical cores and logical threads", node.json?.cores === 16 && node.json?.threads === 32 && node.json?.sockets === 1);
+  check("node.detail reports PCI GPUs without inventing one", (node.json?.gpus ?? []).length === 1 && /RTX A4000/.test(node.json?.gpus?.[0]?.name ?? ""));
   check("node.detail reports disks with health", (node.json?.disks ?? []).some((disk) => disk.health === "PASSED"));
   check("node.detail lists storage pools with usage", (node.json?.storage ?? []).length === 2);
   check("node.detail samples RRD history", (node.json?.rrd ?? []).length >= 10);

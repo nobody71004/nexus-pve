@@ -7,10 +7,12 @@ import { ToolRegistry } from "./registry";
 import { registerPveTools } from "./tools-pve";
 import { registerDevTools } from "./tools-dev";
 import { registerSecurityTools } from "./tools-security";
+import { registerSshKeyTools } from "./tools-sshkeys";
 import { registerDdosTools } from "./tools-ddos";
 import { registerPraetorTools } from "./tools-praetor";
 import { registerSshTools } from "./tools-ssh";
 import { bindGuardianEmit, guardian } from "../security/guardian";
+import { sshKeys } from "../sshkeys/service";
 import { setHelperAppRoot } from "../ssh/helper";
 import { setDdosAppRoot } from "../ddos/service";
 import { setPraetorAppRoot } from "../praetor/service";
@@ -31,6 +33,7 @@ export function createRuntime(appRoot: string, emit: (event: NexusEvent) => void
   const registry = new ToolRegistry();
   registerPveTools(registry);
   registerSshTools(registry);
+  registerSshKeyTools(registry);
   registerSecurityTools(registry);
   registerDdosTools(registry);
   registerPraetorTools(registry);
@@ -46,6 +49,8 @@ export function createRuntime(appRoot: string, emit: (event: NexusEvent) => void
   setPraetorAppRoot(appRoot);
   bindGuardianEmit(emit);
   guardian.start();
+  sshKeys.bindEmit(emit);
+  sshKeys.start();
 
   singleton = { store, registry, pipelines, appRoot: path.resolve(appRoot) };
   return singleton;
@@ -53,6 +58,7 @@ export function createRuntime(appRoot: string, emit: (event: NexusEvent) => void
 
 export function resetRuntime(): void {
   guardian.stop();
+  sshKeys.stop();
   singleton = null;
 }
 

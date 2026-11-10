@@ -44,6 +44,8 @@ function nodeCompact(node: NodeStats) {
     status: node.status,
     cpuPct: Math.round(node.cpu * 1000) / 10,
     cores: node.cores,
+    threads: node.threads,
+    sockets: node.sockets,
     cpuModel: node.model,
     memory: { pct: pct(node.memory.used, node.memory.total), usedGB: gb(node.memory.used), totalGB: gb(node.memory.total) },
     swapPct: pct(node.swap.used, node.swap.total),
@@ -63,6 +65,8 @@ function nodeCompact(node: NodeStats) {
       totalGB: gb(entry.total),
     })),
     disksWithHealthWarnings: critical.map((disk) => ({ dev: disk.dev, health: disk.health, wearout: disk.wearout ?? null })),
+    gpus: node.gpus,
+    gpuError: node.gpuError ?? null,
   };
 }
 
@@ -177,7 +181,7 @@ export function registerPveTools(registry: ToolRegistry): void {
     name: "node.detail",
     title: "Node hardware detail",
     description:
-      "Full hardware report for one node: CPU model/cores, memory, swap, rootfs, load, disks (model, serial, health, wearout), storage pools, NICs, sensors and a 1-hour RRD sample.",
+      "Full hardware report for one node: CPU model/cores/threads/sockets, memory, swap, rootfs, load, physical disks (model, serial, health, wearout), storage pools, PCI GPUs, NICs, sensors and a 1-hour RRD sample. GPU errors are reported rather than hidden.",
     category: "read",
     inputSchema: {
       type: "object",

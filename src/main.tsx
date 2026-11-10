@@ -5,6 +5,7 @@ import "./styles.css";
 import "./team-styles.css";
 import "./ddos-styles.css";
 import "./praetor.css";
+import "./sshkeys-styles.css";
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

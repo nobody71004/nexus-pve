@@ -239,6 +239,29 @@ export async function startMockServer(port = 0) {
             { iface: "eth0", type: "eth", active: 1, speed: "10000" },
           ]);
         }
+        if (route[2] === "hardware" && route[3] === "pci") {
+          return send([
+            {
+              id: "0000:41:00.0",
+              class: "030000",
+              class_name: "VGA compatible controller",
+              vendor: "10de",
+              vendor_name: "NVIDIA Corporation",
+              device: "24b0",
+              device_name: "GA104GL [RTX A4000]",
+              iommugroup: 22,
+            },
+            {
+              id: "0000:00:1f.3",
+              class: "040300",
+              class_name: "Audio device",
+              vendor: "8086",
+              vendor_name: "Intel Corporation",
+              device: "a1f0",
+              device_name: "Audio controller",
+            },
+          ]);
+        }
         if (route[2] === "sensors") {
           return fail(500, "no sensors found");
         }

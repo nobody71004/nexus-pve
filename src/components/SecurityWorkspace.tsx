@@ -2,8 +2,9 @@ import { useState } from "react";
 import { Icon } from "./Icon";
 import { SecurityCenter } from "./SecurityCenter";
 import { DdosShield } from "./DdosShield";
+import { SshKeysPanel } from "./SshKeysPanel";
 
-type Section = "posture" | "ddos";
+type Section = "posture" | "keys" | "ddos";
 
 export function SecurityWorkspace({
   onToast,
@@ -28,6 +29,16 @@ export function SecurityWorkspace({
         </button>
         <button
           role="tab"
+          aria-selected={section === "keys"}
+          className={`sec-tab ${section === "keys" ? "active" : ""}`}
+          onClick={() => setSection("keys")}
+        >
+          <Icon name="shield" size={14} />
+          <span>SSH keys</span>
+          <em>24/7</em>
+        </button>
+        <button
+          role="tab"
           aria-selected={section === "ddos"}
           className={`sec-tab ${section === "ddos" ? "active" : ""}`}
           onClick={() => setSection("ddos")}
@@ -39,6 +50,8 @@ export function SecurityWorkspace({
       </div>
       {section === "posture" ? (
         <SecurityCenter onToast={onToast} />
+      ) : section === "keys" ? (
+        <SshKeysPanel onToast={onToast} />
       ) : (
         <DdosShield onToast={onToast} onOpenConnections={onOpenConnections} />
       )}

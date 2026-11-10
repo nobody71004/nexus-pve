@@ -1527,7 +1527,7 @@ kbd {
 }
 .storage-row {
   display: grid;
-  grid-template-columns: 108px 1fr 34px 70px;
+  grid-template-columns: 108px 1fr 34px 96px;
   align-items: center;
   gap: 8px;
   font-size: 10px;
@@ -1542,10 +1542,61 @@ kbd {
   text-overflow: ellipsis;
 }
 .storage-row .mono {
+  overflow: hidden;
   font-size: 9.5px;
   color: var(--muted);
   text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.node-gpu {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 28px;
+  padding: 8px 2px 0;
+  border-top: 1px solid rgba(120, 220, 255, 0.08);
+  font-size: 11px;
+}
+
+.node-gpu-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.node-gpu-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-width: 0;
+}
+
+.node-gpu-list span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.node-gpu-list strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.node-gpu-list em {
+  color: var(--text-dim);
+  font-style: normal;
+  flex: 0 0 auto;
+}
+
 .node-foot {
   display: flex;
   align-items: center;

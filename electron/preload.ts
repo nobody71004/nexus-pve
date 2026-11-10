@@ -113,6 +113,23 @@ const bridge: NexusBridge = {
     helper: (hostId: string) => ipcRenderer.invoke(IPC.sshHelper, hostId),
     installHelper: (hostId: string, sudoPassword?: string) => ipcRenderer.invoke(IPC.sshHelperInstall, hostId, sudoPassword),
   },
+  sshkeys: {
+    overview: () => ipcRenderer.invoke(IPC.sshKeysOverview),
+    generate: (input: { label: string; owner?: string }) => ipcRenderer.invoke(IPC.sshKeysGenerate, input),
+    deploy: (hostId: string, keyId: string) => ipcRenderer.invoke(IPC.sshKeysDeploy, hostId, keyId),
+    scan: (hostId: string) => ipcRenderer.invoke(IPC.sshKeysScan, hostId),
+    trust: (hostId: string, fingerprints?: string[]) => ipcRenderer.invoke(IPC.sshKeysTrust, hostId, fingerprints),
+    enforce: (hostId: string, confirm: boolean) => ipcRenderer.invoke(IPC.sshKeysEnforce, hostId, confirm),
+    policy: (patch) => ipcRenderer.invoke(IPC.sshKeysPolicy, patch),
+    revoke: (keyId: string, confirm: boolean) => ipcRenderer.invoke(IPC.sshKeysRevoke, keyId, confirm),
+    onChanged: (handler) => {
+      const listener = (_event: unknown, payload: NexusEvent) => {
+        if (payload.type === "sshkeys" && payload.sshKeys) handler(payload.sshKeys);
+      };
+      ipcRenderer.on(IPC.event, listener);
+      return () => ipcRenderer.removeListener(IPC.event, listener);
+    },
+  },
   security: {
     overview: () => ipcRenderer.invoke(IPC.securityOverview),
     scan: (hostId: string) => ipcRenderer.invoke(IPC.securityScan, hostId),
