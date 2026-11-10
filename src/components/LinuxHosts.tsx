@@ -21,6 +21,7 @@ import { VncConsole } from "./VncConsole";
 import { Chip, Gauge, Modal, Panel, Skeleton, Sparkline, StatusDot, type Tone } from "./ui";
 import { GpuTelemetryPanel } from "./GpuDial";
 import { ServerHardware } from "./ServerHardware";
+import { sshGpuAlertHostKey } from "../../shared/gpu-alerts";
 
 const EMPTY: SshHostInput = {
   label: "",
@@ -917,7 +918,12 @@ export function LinuxHosts({
 
                   <ServerHardware snapshot={snapshot} />
 
-                  <GpuTelemetryPanel gpus={snapshot.gpus ?? []} error={snapshot.gpuError} />
+                  <GpuTelemetryPanel
+                    gpus={snapshot.gpus ?? []}
+                    error={snapshot.gpuError}
+                    hostKey={sshGpuAlertHostKey(activeHost.id)}
+                    hostLabel={activeHost.label}
+                  />
 
                   <div className="dial-row">
                     {dials.map((dial) => (

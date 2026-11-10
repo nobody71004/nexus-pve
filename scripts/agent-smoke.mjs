@@ -7,7 +7,9 @@
  *    restore -> snapshot rollback -> schedules -> evidence bundle -> dev tools,
  * 4. exercises the PRAETOR install gate and an active-Proxmox-firewall status
  *    regression through a local mock SSH host,
- * 5. asserts both the agent responses and the Proxmox calls the mock received.
+ * 5. opens and closes a real loopback VNC bridge through a local SSH + RFB
+ *    fixture and checks that the token never reaches sessions, audit or stderr,
+ * 6. asserts both the agent responses and the Proxmox calls the mock received.
  *
  * No network, no real Proxmox, no credentials.
  */
@@ -19,6 +21,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import ssh2 from "ssh2";
+import { WebSocket } from "ws";
 import { startMockServer } from "./mock-pve.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -36,6 +39,8 @@ const check = (name, ok, detail = "") => {
 const home = mkdtempSync(path.join(tmpdir(), "nexus-pve-smoke-"));
 const mock = await startMockServer(0);
 let firewallSsh = null;
+let vncSsh = null;
+let vncFixture = null;
 
 const child = spawn(process.execPath, [serverPath], {
   cwd: root,
@@ -186,7 +191,7 @@ function unreadableFirewallStatus(expectedSha) {
   ].join("\n");
 }
 
-function startMockSsh(host, output) {
+function startMockSsh(host, output, options = {}) {
   const { privateKey } = crypto.generateKeyPairSync("rsa", {
     modulusLength: 2048,
     privateKeyEncoding: { type: "pkcs1", format: "pem" },
@@ -194,6 +199,7 @@ function startMockSsh(host, output) {
   });
   const sockets = new Set();
   const scripts = [];
+  const forwarded = [];
   const server = new ssh2.Server({ hostKeys: [privateKey] }, (client) => {
     client.on("error", () => {});
     client.on("authentication", (ctx) => {
@@ -220,6 +226,30 @@ function startMockSsh(host, output) {
         });
       });
     });
+    if (options.forwardTo) {
+      client.on("tcpip", (accept, reject, info) => {
+        const target = options.forwardTo;
+        if (info.destIP !== target.host || info.destPort !== target.port) {
+          reject();
+          return;
+        }
+        const stream = accept();
+        const socket = net.connect(target.port, target.host);
+        forwarded.push({ destIP: info.destIP, destPort: info.destPort });
+        socket.on("connect", () => {
+          stream.pipe(socket).pipe(stream);
+        });
+        socket.on("error", () => {
+          try {
+            stream.close();
+          } catch {
+            /* already closed */
+          }
+        });
+        stream.on("error", () => socket.destroy());
+        stream.on("close", () => socket.destroy());
+      });
+    }
   });
   server.on("connection", (socket) => {
     sockets.add(socket);
@@ -234,6 +264,34 @@ function startMockSsh(host, output) {
       resolve({
         port: server.address().port,
         scripts,
+        forwarded,
+        close: () =>
+          new Promise((done) => {
+            for (const socket of sockets) socket.destroy();
+            server.close(() => done());
+          }),
+      });
+    });
+  });
+}
+
+/** Minimal RFB listener: enough to prove the WebSocket bridge reaches the host. */
+function startVncFixture() {
+  const sockets = new Set();
+  const server = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+    socket.on("error", () => undefined);
+    socket.write("RFB 003.008\n");
+  });
+  return new Promise((resolve, reject) => {
+    const onError = (error) => reject(error);
+    server.once("error", onError);
+    server.listen(0, "127.0.0.1", () => {
+      server.removeListener("error", onError);
+      server.on("error", () => {});
+      resolve({
+        port: server.address().port,
         close: () =>
           new Promise((done) => {
             for (const socket of sockets) socket.destroy();
@@ -249,6 +307,20 @@ const cleanup = async () => {
     child.kill();
   } catch {
     /* already gone */
+  }
+  if (vncSsh) {
+    try {
+      await vncSsh.close();
+    } catch {
+      /* already closed */
+    }
+  }
+  if (vncFixture) {
+    try {
+      await vncFixture.close();
+    } catch {
+      /* already closed */
+    }
   }
   if (firewallSsh) {
     try {
@@ -458,6 +530,122 @@ try {
     machineVncGate.json?.error ?? machineVncGate.text.slice(0, 160),
   );
 
+  // ---- local VNC fixture: open/close and token hygiene --------------------
+  // A password-auth SSH fixture forwards one TCP channel to a local RFB
+  // listener. This exercises the real machines.vnc.open tunnel instead of only
+  // checking the confirmation gate.
+  const masterKey = crypto.randomBytes(32);
+  mkdirSync(path.join(home, "keys"), { recursive: true, mode: 0o700 });
+  writeFileSync(path.join(home, "keys", "master.key"), masterKey, { mode: 0o600 });
+  const vncPassword = crypto.randomBytes(18).toString("base64url");
+  vncFixture = await startVncFixture();
+  vncSsh = await startMockSsh("127.0.0.1", "", {
+    forwardTo: { host: "127.0.0.1", port: vncFixture.port },
+  });
+  gateConfig.sshHosts = [
+    {
+      id: "vnc-fixture-host",
+      label: "vnc-fixture",
+      host: "127.0.0.1",
+      port: vncSsh.port,
+      username: "root",
+      authMode: "password",
+      hasSecret: true,
+      color: "#3dffa8",
+      createdAt: Date.now(),
+      vncPort: vncFixture.port,
+      secretEnc: encryptSecret(vncPassword, masterKey),
+    },
+  ];
+  writeFileSync(configPath, `${JSON.stringify(gateConfig, null, 2)}\n`, { mode: 0o600 });
+
+  const openVnc = await call("machines.vnc.open", { target: "ssh:vnc-fixture-host", confirm: true });
+  const vncSession = openVnc.json?.session;
+  const vncUrl = typeof vncSession?.wsUrl === "string" ? vncSession.wsUrl : "";
+  let vncToken = "";
+  try {
+    vncToken = new URL(vncUrl).pathname.replace(/^\/+/, "");
+  } catch {
+    /* the failed check below reports the malformed URL */
+  }
+  check(
+    "machines.vnc.open creates a loopback session through the local SSH fixture",
+    openVnc.isError === false &&
+      /^ws:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]{20,}$/.test(vncUrl) &&
+      typeof vncSession?.id === "string" &&
+      vncToken.length >= 20,
+    vncUrl.replace(vncToken, "<token>"),
+  );
+
+  let vncBanner = "";
+  if (vncUrl) {
+    const ws = new WebSocket(vncUrl);
+    vncBanner = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        ws.terminate();
+        reject(new Error("timed out waiting for the RFB fixture banner"));
+      }, 5_000);
+      ws.once("message", (data) => {
+        clearTimeout(timer);
+        resolve(Buffer.from(data).toString("utf8"));
+      });
+      ws.once("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+    await new Promise((resolve) => {
+      ws.once("close", resolve);
+      ws.close();
+    });
+  }
+  check(
+    "the VNC bridge relays the local RFB fixture",
+    vncBanner === "RFB 003.008\n" && vncSsh.forwarded.length === 1 && vncSsh.forwarded[0]?.destPort === vncFixture.port,
+    `${JSON.stringify(vncBanner)} / ${vncSsh.forwarded.length} forwarded channel(s)`,
+  );
+
+  const vncSessions = await call("machines.vnc.sessions");
+  const vncSessionsText = JSON.stringify(vncSessions.json ?? {});
+  check(
+    "machines.vnc.sessions exposes metadata but not the session token",
+    vncSessions.isError === false && vncSessionsText.includes(vncSession?.id ?? "") && !vncSessionsText.includes(vncToken),
+    vncSession?.id,
+  );
+
+  const closeVnc = await call("machines.vnc.close", { sessionId: vncSession?.id });
+  const afterVncClose = await call("machines.vnc.sessions");
+  const afterVncCloseText = JSON.stringify(afterVncClose.json ?? {});
+  check(
+    "machines.vnc.close removes the session and never echoes its token",
+    closeVnc.isError === false &&
+      closeVnc.json?.closed === vncSession?.id &&
+      !afterVncCloseText.includes(vncSession?.id ?? "") &&
+      !afterVncCloseText.includes(vncToken) &&
+      !closeVnc.text.includes(vncToken),
+    closeVnc.json?.closed,
+  );
+
+  const vncAudit = await call("audit.tail", { limit: 500 });
+  const vncAuditText = JSON.stringify(vncAudit.json ?? {});
+  const vncAuditFile = typeof vncAudit.json?.file === "string" ? readFileSync(vncAudit.json.file, "utf8") : "";
+  const vncAuditedTools = new Set((vncAudit.json?.entries ?? []).map((entry) => entry.tool));
+  check(
+    "VNC open/close are audited without the session token",
+    vncAuditedTools.has("machines.vnc.open") &&
+      vncAuditedTools.has("machines.vnc.close") &&
+      vncToken.length > 0 &&
+      !vncAuditText.includes(vncToken) &&
+      !vncAuditFile.includes(vncToken),
+    `${vncAudit.json?.count ?? 0} audit entries`,
+  );
+  check("MCP stderr never contains the VNC session token", vncToken.length > 0 && !stderr.includes(vncToken));
+
+  await vncSsh.close();
+  vncSsh = null;
+  await vncFixture.close();
+  vncFixture = null;
+
   // ---- PRAETOR status: active Proxmox firewall without a 9443 allowance -----
   // The mock SSH host answers the real status script with active PVE firewall
   // evidence. Its loopback address has no listener on 9443, so the real TCP
@@ -467,9 +655,6 @@ try {
   const firewallHost = await pickFirewallHost();
   firewallSsh = await startMockSsh(firewallHost, firewallStatus(praetor.json.expectedSha));
   const firewallPassword = crypto.randomBytes(18).toString("base64url");
-  const masterKey = crypto.randomBytes(32);
-  mkdirSync(path.join(home, "keys"), { recursive: true, mode: 0o700 });
-  writeFileSync(path.join(home, "keys", "master.key"), masterKey, { mode: 0o600 });
   gateConfig.sshHosts = [
     {
       id: "praetor-firewall-host",

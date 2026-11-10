@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import type { SshHostSummary, SshRuntimeStatus, SshSnapshot } from "../../shared/types";
 import { bytes, duration, pct } from "../lib/format";
-import { findSustainedTemperatureAlert } from "../../shared/gpu-alerts";
+import { findSustainedTemperatureAlert, sshGpuAlertHostKey } from "../../shared/gpu-alerts";
 import { useGpuAlerts } from "../lib/gpuAlerts";
 import { Icon } from "./Icon";
 import { Chip, MiniBar, Sparkline, type Tone } from "./ui";
@@ -57,7 +57,8 @@ export function SshServerCard({
   const memoryPeak = Math.max(memory, ...samples.map((sample) => sample.mem));
   const net = samples.map((sample) => sample.netRx + sample.netTx);
   const latency = Math.round(status?.latencyMs ?? snapshot?.status.latencyMs ?? 0);
-  const thresholds = useGpuAlerts();
+  const gpuHostKey = sshGpuAlertHostKey(host.id);
+  const thresholds = useGpuAlerts(gpuHostKey);
   const thermalAlert = findSustainedTemperatureAlert(snapshot?.gpus ?? [], thresholds);
 
   return (
@@ -186,6 +187,8 @@ export function SshServerCard({
       <GpuTelemetryPanel
         gpus={snapshot?.gpus ?? []}
         error={snapshot?.gpuError}
+        hostKey={gpuHostKey}
+        hostLabel={host.label}
       />
 
       <div className="node-foot">

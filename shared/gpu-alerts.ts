@@ -1,4 +1,9 @@
-import type { GpuAlertThresholds, GpuTelemetry } from "./types";
+import type {
+  GpuAlertOverrides,
+  GpuAlertThresholdOverride,
+  GpuAlertThresholds,
+  GpuTelemetry,
+} from "./types";
 
 export const DEFAULT_GPU_ALERTS: GpuAlertThresholds = {
   temperatureC: 85,
@@ -6,6 +11,70 @@ export const DEFAULT_GPU_ALERTS: GpuAlertThresholds = {
   powerPct: 90,
   vramPct: 90,
 };
+
+export const GPU_ALERT_LIMITS: Record<keyof GpuAlertThresholds, { min: number; max: number }> = {
+  temperatureC: { min: 30, max: 110 },
+  temperatureSamples: { min: 2, max: 20 },
+  powerPct: { min: 10, max: 100 },
+  vramPct: { min: 10, max: 100 },
+};
+
+function normalizeGpuAlertValue(key: keyof GpuAlertThresholds, raw: unknown): number | undefined {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return undefined;
+  const limits = GPU_ALERT_LIMITS[key];
+  return Math.min(limits.max, Math.max(limits.min, value));
+}
+
+/** Keep only explicitly set values, clamped to the same ranges as global settings. */
+export function normalizeGpuAlertOverride(input: unknown): GpuAlertThresholdOverride | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+  const source = input as Record<string, unknown>;
+  const result: GpuAlertThresholdOverride = {};
+  for (const key of Object.keys(GPU_ALERT_LIMITS) as Array<keyof GpuAlertThresholds>) {
+    if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+    const raw = source[key];
+    if (raw === undefined || raw === null || raw === "") continue;
+    const value = normalizeGpuAlertValue(key, raw);
+    if (value !== undefined) result[key] = value;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+/** Normalize persisted host overrides and discard malformed keys/values. */
+export function normalizeGpuAlertOverrides(input: unknown): GpuAlertOverrides {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  const result: GpuAlertOverrides = {};
+  for (const [rawKey, rawValue] of Object.entries(input as Record<string, unknown>)) {
+    const key = rawKey.trim();
+    if (!/^(?:pve|ssh):[^\s]+$/.test(key) || key.length > 300) continue;
+    const value = normalizeGpuAlertOverride(rawValue);
+    if (value) result[key] = value;
+  }
+  return result;
+}
+
+/** Merge a host override over the global defaults without dropping inherited fields. */
+export function resolveGpuAlertThresholds(
+  base: GpuAlertThresholds,
+  override?: GpuAlertThresholdOverride,
+): GpuAlertThresholds {
+  const result = { ...base };
+  if (!override) return result;
+  for (const key of Object.keys(GPU_ALERT_LIMITS) as Array<keyof GpuAlertThresholds>) {
+    const value = override[key];
+    if (typeof value === "number" && Number.isFinite(value)) result[key] = value;
+  }
+  return result;
+}
+
+export function pveGpuAlertHostKey(endpointId: string, node: string): string {
+  return `pve:${endpointId}:${node}`;
+}
+
+export function sshGpuAlertHostKey(hostId: string): string {
+  return `ssh:${hostId}`;
+}
 
 export interface GpuAlertState {
   /** True only after the configured number of consecutive hot temperature samples. */

@@ -5,8 +5,13 @@
  * requiring NVIDIA or AMD hardware in the test machine.
  */
 import { buildSync } from "esbuild";
+import { mkdtempSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+
+const require = createRequire(import.meta.url);
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -38,7 +43,15 @@ const alertBundle = buildSync({
 });
 const alertModule = { exports: {} };
 new Function("module", "exports", "require", alertBundle.outputFiles[0].text)(alertModule, alertModule.exports, undefined);
-const { DEFAULT_GPU_ALERTS, evaluateGpuAlerts } = alertModule.exports;
+const {
+  DEFAULT_GPU_ALERTS,
+  evaluateGpuAlerts,
+  normalizeGpuAlertOverride,
+  normalizeGpuAlertOverrides,
+  resolveGpuAlertThresholds,
+  pveGpuAlertHostKey,
+  sshGpuAlertHostKey,
+} = alertModule.exports;
 
 const nvidia = parseGpuProbe(`@@gpu
 --nvidia
@@ -135,6 +148,82 @@ check(
   customState.temperature && customState.power && customState.vram,
   JSON.stringify(customState),
 );
+const hostOverride = normalizeGpuAlertOverride({ temperatureC: 92, powerPct: "", vramPct: 150 });
+const hostEffective = resolveGpuAlertThresholds(DEFAULT_GPU_ALERTS, hostOverride);
+check(
+  "host GPU overrides are partial and clamped",
+  hostOverride?.temperatureC === 92 &&
+    hostOverride?.powerPct === undefined &&
+    hostOverride?.vramPct === 100 &&
+    !("temperatureSamples" in (hostOverride ?? {})),
+  JSON.stringify(hostOverride),
+);
+check(
+  "untouched host GPU limits inherit the global defaults",
+  hostEffective.temperatureC === 92 &&
+    hostEffective.temperatureSamples === DEFAULT_GPU_ALERTS.temperatureSamples &&
+    hostEffective.powerPct === DEFAULT_GPU_ALERTS.powerPct &&
+    hostEffective.vramPct === 100,
+  JSON.stringify(hostEffective),
+);
+const pveKey = pveGpuAlertHostKey("endpoint-1", "pve-node-1");
+const sshKey = sshGpuAlertHostKey("ssh-host-1");
+const scopedOverrides = normalizeGpuAlertOverrides({
+  [pveKey]: { temperatureSamples: 5 },
+  [sshKey]: { powerPct: 80 },
+  global: { temperatureC: 50 },
+});
+check(
+  "host GPU overrides are scoped to Proxmox nodes and SSH hosts",
+  Object.keys(scopedOverrides).length === 2 &&
+    scopedOverrides[pveKey]?.temperatureSamples === 5 &&
+    scopedOverrides[sshKey]?.powerPct === 80 &&
+    !("global" in scopedOverrides),
+  Object.keys(scopedOverrides).join(", "),
+);
+
+const previousHome = process.env.NEXUS_PVE_HOME;
+const tempHome = mkdtempSync(path.join(tmpdir(), "nexus-gpu-alerts-"));
+process.env.NEXUS_PVE_HOME = tempHome;
+try {
+  const configBundle = buildSync({
+    entryPoints: [path.join(root, "electron", "config.ts")],
+    bundle: true,
+    platform: "node",
+    format: "cjs",
+    write: false,
+    logLevel: "silent",
+  });
+  const configModule = { exports: {} };
+  new Function("module", "exports", "require", configBundle.outputFiles[0].text)(
+    configModule,
+    configModule.exports,
+    require,
+  );
+  const { ConfigStore } = configModule.exports;
+  const store = new ConfigStore();
+  store.setSettings({ gpuAlertOverrides: { [pveKey]: { temperatureC: 92 } } });
+  const afterGlobalChange = store.setSettings({
+    gpuAlerts: { ...DEFAULT_GPU_ALERTS, temperatureC: 80 },
+  });
+  const persisted = store.settings();
+  check(
+    "host GPU overrides survive a global threshold save",
+    afterGlobalChange.gpuAlerts.temperatureC === 80 &&
+      persisted.gpuAlertOverrides[pveKey]?.temperatureC === 92,
+    JSON.stringify(persisted.gpuAlertOverrides),
+  );
+  const cleared = store.setSettings({ gpuAlertOverrides: {} });
+  check(
+    "host GPU overrides can be cleared without resetting global limits",
+    Object.keys(cleared.gpuAlertOverrides).length === 0 && cleared.gpuAlerts.temperatureC === 80,
+    JSON.stringify(cleared.gpuAlerts),
+  );
+} finally {
+  if (previousHome === undefined) delete process.env.NEXUS_PVE_HOME;
+  else process.env.NEXUS_PVE_HOME = previousHome;
+  rmSync(tempHome, { recursive: true, force: true });
+}
 const twoSamples = evaluateGpuAlerts(
   { ...alertGpu, history: { utilization: [], temperatureC: [87.5, 88] } },
   DEFAULT_GPU_ALERTS,

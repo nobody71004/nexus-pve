@@ -1428,6 +1428,7 @@ export function createMockBridge(): NexusBridge {
     reduceMotion: false,
     confirmDestructive: true,
     gpuAlerts: { ...DEFAULT_GPU_ALERTS },
+    gpuAlertOverrides: {},
   };
   const mockSyncStatus = (): TeamSyncStatus => ({
     enabled: false,
@@ -1455,7 +1456,7 @@ export function createMockBridge(): NexusBridge {
   return {
     app: {
       info: async () => ({
-        version: "1.0.0",
+        version: "1.0.10",
         electron: "33.4.11",
         node: "20.18.1",
         chrome: "130.0.6723.152",

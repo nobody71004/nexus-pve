@@ -1,8 +1,14 @@
 import { useEffect, useId, useState, type CSSProperties, type FormEvent } from "react";
-import type { GpuAlertThresholds, GpuInfo, GpuTelemetry } from "../../shared/types";
+import type { GpuAlertThresholdOverride, GpuAlertThresholds, GpuInfo, GpuTelemetry } from "../../shared/types";
 import { evaluateGpuAlerts, gpuPowerPct, gpuVramPct } from "../../shared/gpu-alerts";
 import { bytes, cx } from "../lib/format";
-import { saveGpuAlerts, useGpuAlerts } from "../lib/gpuAlerts";
+import {
+  resetGpuAlertOverride,
+  saveGpuAlertOverride,
+  saveGpuAlerts,
+  useGpuAlertOverride,
+  useGpuAlerts,
+} from "../lib/gpuAlerts";
 import { Icon } from "./Icon";
 import { Sparkline, type Tone } from "./ui";
 
@@ -113,33 +119,119 @@ function GpuHistoryTile({
   );
 }
 
-function GpuAlertSettings({ thresholds }: { thresholds: GpuAlertThresholds }) {
-  const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<GpuAlertThresholds>(thresholds);
-  const [saving, setSaving] = useState(false);
+type HostAlertDraft = Record<keyof GpuAlertThresholds, string>;
+
+const EMPTY_HOST_DRAFT: HostAlertDraft = {
+  temperatureC: "",
+  temperatureSamples: "",
+  powerPct: "",
+  vramPct: "",
+};
+
+function hostDraftFromOverride(override?: GpuAlertThresholdOverride): HostAlertDraft {
+  return {
+    temperatureC: override?.temperatureC === undefined ? "" : String(override.temperatureC),
+    temperatureSamples: override?.temperatureSamples === undefined ? "" : String(override.temperatureSamples),
+    powerPct: override?.powerPct === undefined ? "" : String(override.powerPct),
+    vramPct: override?.vramPct === undefined ? "" : String(override.vramPct),
+  };
+}
+
+function parseHostDraft(draft: HostAlertDraft): GpuAlertThresholdOverride {
+  const result: GpuAlertThresholdOverride = {};
+  for (const key of Object.keys(EMPTY_HOST_DRAFT) as Array<keyof GpuAlertThresholds>) {
+    const raw = draft[key].trim();
+    if (!raw) continue;
+    const value = Number(raw);
+    if (!Number.isFinite(value)) throw new Error(`Enter a number for ${key}.`);
+    result[key] = value;
+  }
+  return result;
+}
+
+function thresholdSummary(thresholds: GpuAlertThresholds): string {
+  return `${thresholds.temperatureC}°C ×${thresholds.temperatureSamples} · ${thresholds.powerPct}% power · ${thresholds.vramPct}% VRAM`;
+}
+
+function GpuAlertSettings({
+  thresholds,
+  globalThresholds,
+  hostKey,
+  hostLabel,
+  override,
+}: {
+  thresholds: GpuAlertThresholds;
+  globalThresholds: GpuAlertThresholds;
+  hostKey?: string;
+  hostLabel?: string;
+  override?: GpuAlertThresholdOverride;
+}) {
+  const [globalOpen, setGlobalOpen] = useState(false);
+  const [hostOpen, setHostOpen] = useState(false);
+  const [globalDraft, setGlobalDraft] = useState<GpuAlertThresholds>(globalThresholds);
+  const [hostDraft, setHostDraft] = useState<HostAlertDraft>(() => hostDraftFromOverride(override));
+  const [saving, setSaving] = useState<"global" | "host" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const hasOverride = Boolean(hostKey && override && Object.keys(override).length > 0);
 
-  useEffect(() => setDraft(thresholds), [thresholds]);
+  useEffect(() => setGlobalDraft(globalThresholds), [globalThresholds]);
+  useEffect(() => setHostDraft(hostDraftFromOverride(override)), [override]);
 
-  const save = async (event: FormEvent) => {
+  const saveGlobal = async (event: FormEvent) => {
     event.preventDefault();
-    if (Object.values(draft).some((value) => !Number.isFinite(value))) {
+    if (Object.values(globalDraft).some((value) => !Number.isFinite(value))) {
       setError("Enter a number for every limit.");
       return;
     }
-    setSaving(true);
+    setSaving("global");
     setError(null);
     try {
-      await saveGpuAlerts(draft);
-      setOpen(false);
+      await saveGpuAlerts(globalDraft);
+      setGlobalOpen(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setSaving(false);
+      setSaving(null);
     }
   };
 
-  const field = (key: keyof GpuAlertThresholds, label: string, unit: string, min: number, max: number) => (
+  const saveHost = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!hostKey) return;
+    let next: GpuAlertThresholdOverride;
+    try {
+      next = parseHostDraft(hostDraft);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return;
+    }
+    setSaving("host");
+    setError(null);
+    try {
+      await saveGpuAlertOverride(hostKey, next);
+      setHostOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const clearHost = async () => {
+    if (!hostKey) return;
+    setSaving("host");
+    setError(null);
+    try {
+      await resetGpuAlertOverride(hostKey);
+      setHostOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const globalField = (key: keyof GpuAlertThresholds, label: string, unit: string, min: number, max: number) => (
     <label>
       <span>{label}</span>
       <input
@@ -147,51 +239,125 @@ function GpuAlertSettings({ thresholds }: { thresholds: GpuAlertThresholds }) {
         min={min}
         max={max}
         step={1}
-        value={draft[key]}
-        onChange={(event) => setDraft((current) => ({ ...current, [key]: Number(event.target.value) }))}
+        value={globalDraft[key]}
+        onChange={(event) => setGlobalDraft((current) => ({ ...current, [key]: Number(event.target.value) }))}
       />
       <em>{unit}</em>
     </label>
   );
 
+  const hostField = (key: keyof GpuAlertThresholds, label: string, unit: string, min: number, max: number) => {
+    const inherited = globalThresholds[key];
+    return (
+      <label>
+        <span>{label}</span>
+        <input
+          type="number"
+          min={min}
+          max={max}
+          step={1}
+          value={hostDraft[key]}
+          placeholder={String(inherited)}
+          onChange={(event) => setHostDraft((current) => ({ ...current, [key]: event.target.value }))}
+        />
+        <em>inherit {inherited} {unit}</em>
+      </label>
+    );
+  };
+
   return (
     <div className="gpu-alert-settings">
       <button
         type="button"
-        className={cx("gpu-alert-toggle", open && "active")}
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
+        className={cx("gpu-alert-toggle", globalOpen && "active")}
+        aria-expanded={globalOpen}
+        onClick={() => {
+          setGlobalOpen((current) => !current);
+          setError(null);
+        }}
       >
         <Icon name="settings" size={11} />
-        <span>ALERT LIMITS</span>
-        <em className="mono">
-          {thresholds.temperatureC}°C ×{thresholds.temperatureSamples} · {thresholds.powerPct}% power · {thresholds.vramPct}% VRAM
-        </em>
+        <span>GLOBAL LIMITS</span>
+        <em className="mono">{thresholdSummary(globalThresholds)}</em>
       </button>
-      {open ? (
-        <form className="gpu-alert-form" onSubmit={save}>
-          {field("temperatureC", "TEMPERATURE", "°C", 30, 110)}
-          {field("temperatureSamples", "SAMPLES", "consecutive", 2, 20)}
-          {field("powerPct", "POWER", "% limit", 10, 100)}
-          {field("vramPct", "VRAM", "% used", 10, 100)}
+      {globalOpen ? (
+        <form className="gpu-alert-form" onSubmit={saveGlobal}>
+          {globalField("temperatureC", "TEMPERATURE", "°C", 30, 110)}
+          {globalField("temperatureSamples", "SAMPLES", "consecutive", 2, 20)}
+          {globalField("powerPct", "POWER", "% limit", 10, 100)}
+          {globalField("vramPct", "VRAM", "% used", 10, 100)}
           <div className="gpu-alert-form-actions">
             {error ? <span className="warn-text">{error}</span> : null}
             <button
               type="button"
               className="gpu-alert-cancel"
               onClick={() => {
-                setDraft(thresholds);
+                setGlobalDraft(globalThresholds);
                 setError(null);
-                setOpen(false);
+                setGlobalOpen(false);
               }}
             >
               Cancel
             </button>
-            <button type="submit" disabled={saving}>
-              {saving ? "Saving…" : "Save limits"}
+            <button type="submit" disabled={saving !== null}>
+              {saving === "global" ? "Saving…" : "Save limits"}
             </button>
           </div>
         </form>
+      ) : null}
+
+      {hostKey ? (
+        <>
+          <button
+            type="button"
+            className={cx("gpu-alert-toggle", hostOpen && "active", hasOverride && "host-override")}
+            aria-expanded={hostOpen}
+            title={hostLabel ? `GPU limits for ${hostLabel}` : "GPU limits for this host"}
+            onClick={() => {
+              setHostOpen((current) => !current);
+              setError(null);
+            }}
+          >
+            <Icon name="settings" size={11} />
+            <span>THIS HOST</span>
+            <em className="mono">
+              {hasOverride ? thresholdSummary(thresholds) : `using global · ${hostLabel ?? "host"}`}
+            </em>
+          </button>
+          {hostOpen ? (
+            <form className="gpu-alert-form" onSubmit={saveHost}>
+              <p className="gpu-alert-host-note">
+                Blank fields inherit the global limits{hostLabel ? ` for ${hostLabel}` : ""}.
+              </p>
+              {hostField("temperatureC", "TEMPERATURE", "°C", 30, 110)}
+              {hostField("temperatureSamples", "SAMPLES", "consecutive", 2, 20)}
+              {hostField("powerPct", "POWER", "% limit", 10, 100)}
+              {hostField("vramPct", "VRAM", "% used", 10, 100)}
+              <div className="gpu-alert-form-actions">
+                {error ? <span className="warn-text">{error}</span> : null}
+                {hasOverride ? (
+                  <button type="button" className="gpu-alert-cancel" onClick={clearHost} disabled={saving !== null}>
+                    Use global
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="gpu-alert-cancel"
+                  onClick={() => {
+                    setHostDraft(hostDraftFromOverride(override));
+                    setError(null);
+                    setHostOpen(false);
+                  }}
+                >
+                  Cancel
+                </button>
+                <button type="submit" disabled={saving !== null}>
+                  {saving === "host" ? "Saving…" : "Save host"}
+                </button>
+              </div>
+            </form>
+          ) : null}
+        </>
       ) : null}
     </div>
   );
@@ -374,15 +540,22 @@ export function GpuTelemetryPanel({
   inventory = [],
   source,
   className,
+  hostKey,
+  hostLabel,
 }: {
   gpus: GpuTelemetry[];
   error?: string;
   inventory?: GpuInfo[];
   source?: string;
   className?: string;
+  /** Stable key for this host's optional threshold override. */
+  hostKey?: string;
+  hostLabel?: string;
 }) {
   const [selected, setSelected] = useState(0);
-  const thresholds = useGpuAlerts();
+  const thresholds = useGpuAlerts(hostKey);
+  const globalThresholds = useGpuAlerts();
+  const override = useGpuAlertOverride(hostKey);
   const active = gpus[Math.min(selected, Math.max(0, gpus.length - 1))];
   const activeVram = active ? gpuVramPct(active) : undefined;
   const activePower = active ? gpuPowerPct(active) : undefined;
@@ -578,7 +751,13 @@ export function GpuTelemetryPanel({
             </div>
           ) : null}
 
-          <GpuAlertSettings thresholds={thresholds} />
+          <GpuAlertSettings
+            thresholds={thresholds}
+            globalThresholds={globalThresholds}
+            hostKey={hostKey}
+            hostLabel={hostLabel}
+            override={override}
+          />
 
           {active.error ? <p className="gpu-panel-error">{active.error}</p> : null}
         </>

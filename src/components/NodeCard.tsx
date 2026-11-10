@@ -1,7 +1,7 @@
 import { useEffect, useId, useState, type CSSProperties } from "react";
 import type { HostSummary, NodeStats } from "../../shared/types";
 import { cpuPackageTemp } from "../../shared/sensors";
-import { findSustainedTemperatureAlert } from "../../shared/gpu-alerts";
+import { findSustainedTemperatureAlert, pveGpuAlertHostKey } from "../../shared/gpu-alerts";
 import { bytes, cx, duration, pct } from "../lib/format";
 import { useGpuAlerts } from "../lib/gpuAlerts";
 import { GpuTelemetryPanel } from "./GpuDial";
@@ -279,7 +279,8 @@ export function NodeCard({ node, endpoint }: { node: NodeStats; endpoint?: HostS
   const loadPct = node.threads > 0 ? (node.loadavg[0] / node.threads) * 100 : 0;
   const swapPct = node.swap.total > 0 ? pct(node.swap.used, node.swap.total) : 0;
   const offline = node.status !== "online";
-  const thresholds = useGpuAlerts();
+  const gpuHostKey = pveGpuAlertHostKey(endpoint?.id ?? node.node, node.node);
+  const thresholds = useGpuAlerts(gpuHostKey);
   const thermalAlert = findSustainedTemperatureAlert(node.gpuTelemetry ?? [], thresholds);
 
   return (
@@ -407,6 +408,8 @@ export function NodeCard({ node, endpoint }: { node: NodeStats; endpoint?: HostS
         error={node.gpuTelemetryError ?? node.gpuError}
         inventory={node.gpus}
         source={node.gpuTelemetryHost}
+        hostKey={gpuHostKey}
+        hostLabel={node.node}
       />
 
       <div className="node-foot">

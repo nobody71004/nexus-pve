@@ -239,6 +239,17 @@ export interface GpuAlertThresholds {
   vramPct: number;
 }
 
+/** Optional host-specific limits; omitted fields inherit the global values. */
+export interface GpuAlertThresholdOverride {
+  temperatureC?: number;
+  temperatureSamples?: number;
+  powerPct?: number;
+  vramPct?: number;
+}
+
+/** Keyed by `pve:<endpoint id>:<node>` or `ssh:<host id>`. */
+export type GpuAlertOverrides = Record<string, GpuAlertThresholdOverride>;
+
 /**
  * Live per-GPU telemetry collected over SSH. Optional fields mean the driver
  * did not expose the value; they are never filled with a guessed number.
@@ -950,6 +961,7 @@ export interface AppSettings {
   reduceMotion: boolean;
   confirmDestructive: boolean;
   gpuAlerts: GpuAlertThresholds;
+  gpuAlertOverrides: GpuAlertOverrides;
 }
 
 export interface NexusBridge {

@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
+const packageVersion = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version;
 const exeArg = process.argv.find((arg) => arg.startsWith("--exe="));
 const exe = path.resolve(
   process.env.NEXUS_PVE_EXE ??
@@ -204,6 +205,11 @@ try {
   }
 
   check("smoke report completed", report.ok === true, report.error ?? "");
+  check(
+    "packaged app reports the package version",
+    report.version === packageVersion,
+    `${report.version ?? "missing"} / ${packageVersion}`,
+  );
   check(
     "renderer loaded the packaged document",
     report.renderer?.title === "Nexus PVE" && report.renderer?.root === true && report.renderer?.bridge === true,

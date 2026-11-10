@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { configPath, nexusHome } from "./paths";
 import { decryptSecret, encryptSecret } from "./vault";
-import { DEFAULT_GPU_ALERTS } from "../shared/gpu-alerts";
+import { DEFAULT_GPU_ALERTS, normalizeGpuAlertOverrides, sshGpuAlertHostKey } from "../shared/gpu-alerts";
 import type { AppSettings, HostInput, HostSummary, SshHostInput, SshHostSummary } from "../shared/types";
 
 export interface StoredHost extends HostSummary {
@@ -34,6 +34,7 @@ const DEFAULTS: AppSettings = {
   reduceMotion: false,
   confirmDestructive: true,
   gpuAlerts: { ...DEFAULT_GPU_ALERTS },
+  gpuAlertOverrides: {},
 };
 
 function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
@@ -61,6 +62,7 @@ export function normalizeSettings(input: Partial<AppSettings> | undefined): AppS
       powerPct: clampNumber(alerts.powerPct, 10, 100, DEFAULT_GPU_ALERTS.powerPct),
       vramPct: clampNumber(alerts.vramPct, 10, 100, DEFAULT_GPU_ALERTS.vramPct),
     },
+    gpuAlertOverrides: normalizeGpuAlertOverrides(raw.gpuAlertOverrides),
   };
 }
 
@@ -249,6 +251,9 @@ export class ConfigStore {
   removeHost(id: string): void {
     const config = this.read();
     config.hosts = config.hosts.filter((h) => h.id !== id);
+    for (const key of Object.keys(config.settings.gpuAlertOverrides)) {
+      if (key.startsWith(`pve:${id}:`)) delete config.settings.gpuAlertOverrides[key];
+    }
     if (config.activeHostId === id) config.activeHostId = config.hosts[0]?.id;
     this.write(config);
   }
@@ -342,6 +347,7 @@ export class ConfigStore {
   removeSshHost(id: string): void {
     const config = this.read();
     config.sshHosts = config.sshHosts.filter((host) => host.id !== id);
+    delete config.settings.gpuAlertOverrides[sshGpuAlertHostKey(id)];
     this.write(config);
   }
 
@@ -372,7 +378,10 @@ export class ConfigStore {
   setSettings(patch: Partial<AppSettings>): AppSettings {
     const config = this.read();
     const gpuAlerts = { ...config.settings.gpuAlerts, ...(patch.gpuAlerts ?? {}) };
-    config.settings = normalizeSettings({ ...config.settings, ...patch, gpuAlerts });
+    // Overrides are a complete map when supplied so removing one host is explicit;
+    // a patch that only changes global limits leaves every host override intact.
+    const gpuAlertOverrides = patch.gpuAlertOverrides ?? config.settings.gpuAlertOverrides;
+    config.settings = normalizeSettings({ ...config.settings, ...patch, gpuAlerts, gpuAlertOverrides });
     this.write(config);
     return config.settings;
   }

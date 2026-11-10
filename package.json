@@ -1,7 +1,7 @@
 {
   "name": "nexus-pve",
   "productName": "NexusPVE",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Nexus PVE — multi-host Proxmox fleet console with backup studio and an approval-gated agent/MCP pipeline.",
   "private": true,
   "main": "dist-electron/main.cjs",
