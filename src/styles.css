@@ -1032,7 +1032,18 @@ kbd {
 .node-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  align-items: start;
   gap: 12px;
+}
+/* The default desktop window should use the full-width node grid, matching the
+   GPU-control layout instead of squeezing the cards beside the telemetry rail. */
+@media (max-width: 1760px) {
+  .overview-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .overview-grid > .side {
+    position: static;
+  }
 }
 
 .error-banner,
@@ -2336,6 +2347,72 @@ tr:hover .row-actions {
   gap: 8px;
   padding: 12px 18px 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.055);
+}
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.settings-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.settings-section-head h3 {
+  margin: 5px 0 0;
+  font-size: 15px;
+  font-weight: 560;
+}
+.settings-scale-value {
+  font-family: var(--mono);
+  font-size: 24px;
+  line-height: 1;
+  color: var(--cyan);
+  text-shadow: 0 0 18px rgba(62, 242, 255, 0.35);
+  font-variant-numeric: tabular-nums;
+}
+.settings-help {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.65;
+}
+.settings-range {
+  width: 100%;
+  height: 18px;
+  margin: 6px 0 0;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+.settings-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(62, 242, 255, 0.7), rgba(139, 108, 255, 0.6));
+}
+.settings-range::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  appearance: none;
+  border: 2px solid #06121a;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 14px rgba(62, 242, 255, 0.55);
+}
+.settings-range:focus-visible {
+  outline: 2px solid rgba(62, 242, 255, 0.6);
+  outline-offset: 4px;
+  border-radius: 999px;
+}
+.settings-range-labels {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  color: var(--dim);
 }
 .confirm-body {
   color: var(--muted);
@@ -3884,6 +3961,25 @@ tr:hover .row-actions {
 }
 
 @media (max-width: 1320px) {
+  .main {
+    padding: 16px 18px 30px;
+  }
+  .node-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .stat-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .stat-tile .spark {
+    display: none;
+  }
+}
+
+/* Keep the labelled rail through normal desktop widths. At 125–135% UI scale,
+   a 1680px window has a CSS viewport below 1320px; collapsing at that point hid
+   every navigation label. Only switch to the icon rail when space is genuinely
+   constrained. */
+@media (max-width: 1020px) {
   .rail {
     width: 76px;
     flex: 0 0 76px;
@@ -3938,18 +4034,6 @@ tr:hover .row-actions {
   }
   .rail-sync {
     justify-content: center;
-  }
-  .main {
-    padding: 16px 18px 30px;
-  }
-  .node-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .stat-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .stat-tile .spark {
-    display: none;
   }
 }
 

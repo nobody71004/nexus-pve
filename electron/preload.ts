@@ -116,6 +116,7 @@ const bridge: NexusBridge = {
     action: (hostId: string, action: SshAction, target?: string) => ipcRenderer.invoke(IPC.sshAction, hostId, action, target),
     helper: (hostId: string) => ipcRenderer.invoke(IPC.sshHelper, hostId),
     installHelper: (hostId: string, sudoPassword?: string) => ipcRenderer.invoke(IPC.sshHelperInstall, hostId, sudoPassword),
+    setupGpu: (hostId: string) => ipcRenderer.invoke(IPC.sshGpuSetup, hostId),
   },
   sshkeys: {
     overview: () => ipcRenderer.invoke(IPC.sshKeysOverview),

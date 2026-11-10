@@ -5,7 +5,7 @@
  * requiring NVIDIA or AMD hardware in the test machine.
  */
 import { buildSync } from "esbuild";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -78,6 +78,90 @@ check("AMD telemetry is parsed from sysfs", amd.gpus.length === 1 && amd.gpus[0]
 check("AMD utilization and temperatures are parsed", amd.gpus[0]?.utilization === 42 && amd.gpus[0]?.temperatureC === 58 && amd.gpus[0]?.hotspotC === 71, `${amd.gpus[0]?.temperatureC}°C / hotspot ${amd.gpus[0]?.hotspotC}°C`);
 check("AMD VRAM and power are converted", amd.gpus[0]?.memoryTotal === 25753026560 && amd.gpus[0]?.powerW === 188.3, `${amd.gpus[0]?.powerW}W`);
 check("AMD fan and clocks are parsed", amd.gpus[0]?.fanPercent === 39 && amd.gpus[0]?.fanRpm === 1420 && amd.gpus[0]?.clockMhz === 2100, `${amd.gpus[0]?.fanPercent}% / ${amd.gpus[0]?.clockMhz} MHz`);
+
+// Some kernels expose the amdgpu hwmon node without a usable DRM card path.
+const hwmon = parseGpuProbe(`@@gpu
+--pci
+0000:05:00.0 VGA compatible controller: Advanced Micro Devices, Inc. [AMD/ATI] Navi 10 [Radeon RX 5600 OEM/5600 XT / 5700/5700 XT] [1002:731f] (rev ca)
+--amd
+--amd-hwmon
+amdhwmon|0000:05:00.0|17|3|8573157376|123456789|52000|61000|56000|123000000|1450|90|2100Mhz|875Mhz|amdgpu
+@@end`);
+check(
+  "AMD telemetry falls back to generic hwmon",
+  hwmon.gpus.length === 1 &&
+    hwmon.gpus[0]?.source === "amdgpu-sysfs" &&
+    hwmon.gpus[0]?.temperatureC === 52 &&
+    hwmon.gpus[0]?.hotspotC === 61 &&
+    hwmon.gpus[0]?.memoryTemperatureC === 56 &&
+    hwmon.gpus[0]?.powerW === 123 &&
+    hwmon.gpus[0]?.fanRpm === 1450 &&
+    hwmon.gpus[0]?.utilization === 17 &&
+    hwmon.gpus[0]?.driver === "amdgpu",
+  `${hwmon.gpus[0]?.temperatureC}°C / ${hwmon.gpus[0]?.powerW}W / ${hwmon.gpus[0]?.driver}`,
+);
+check(
+  "generic hwmon uses the PCI inventory name and avoids an inventory duplicate",
+  hwmon.gpus.length === 1 && /Navi 10/i.test(hwmon.gpus[0]?.name ?? ""),
+  hwmon.gpus[0]?.name,
+);
+
+// A PCI-only host (no lspci, no DRM card) still has to produce live AMD
+// telemetry when amdgpu exposes counters under the PCI device. This is the
+// exact shape that previously fell back to "inventory only".
+const pciOnly = parseGpuProbe(`@@gpu
+--pci
+0000:05:00.0 VGA compatible controller: Advanced Micro Devices, Inc. [AMD/ATI] Navi 10 [Radeon RX 5600 OEM/5600 XT / 5700/5700 XT] [1002:731f] (rev ca)
+--pci-sysfs
+pcisys|0000:05:00.0|0x1002|0x731f|amdgpu|0x030000
+--amd
+--amd-pci
+amd|0000:05:00.0|0x1002|0x731f|27|11|8573157376|1073741824|54000|63000|58000|156000000|1310|82|1900Mhz|875Mhz|amdgpu
+--amd-diag
+amddiag|0000:05:00.0|amdgpu|1|0
+@@end`);
+check(
+  "AMD PCI-only sysfs probe produces live telemetry",
+  pciOnly.gpus.length === 1 &&
+    pciOnly.gpus[0]?.source === "amdgpu-sysfs" &&
+    pciOnly.gpus[0]?.utilization === 27 &&
+    pciOnly.gpus[0]?.temperatureC === 54 &&
+    pciOnly.gpus[0]?.memoryUsed === 1073741824,
+  `${pciOnly.gpus[0]?.source} / ${pciOnly.gpus[0]?.temperatureC}°C`,
+);
+check(
+  "AMD PCI-only probe uses the lspci name and avoids an inventory duplicate",
+  pciOnly.gpus.length === 1 && /Navi 10/i.test(pciOnly.gpus[0]?.name ?? ""),
+  pciOnly.gpus[0]?.name,
+);
+
+// A VFIO-bound card belongs to a guest. It must stay inventory-only and explain
+// why, rather than suggesting that installing amdgpu would fix the host.
+const vfio = parseGpuProbe(`@@gpu
+--pci
+0000:05:00.0 VGA compatible controller: Advanced Micro Devices, Inc. [AMD/ATI] Navi 10 [Radeon RX 5600 OEM/5600 XT / 5700/5700 XT] [1002:731f] (rev ca)
+--pci-sysfs
+pcisys|0000:05:00.0|0x1002|0x731f|vfio-pci|0x030000
+--amd-diag
+amddiag|0000:05:00.0|vfio-pci|0|0
+@@end`);
+check(
+  "VFIO-bound AMD GPUs are inventory-only with a passthrough explanation",
+  vfio.gpus.length === 1 &&
+    vfio.gpus[0]?.source === "inventory" &&
+    /vfio/i.test(vfio.gpus[0]?.error ?? "") &&
+    /vfio/i.test(vfio.error ?? ""),
+  vfio.gpus[0]?.error,
+);
+
+const setupScript = readFileSync(path.join(root, "resources", "nexus-gpu-setup.sh"), "utf8");
+check(
+  "GPU setup script protects VFIO passthrough and handles AMD firmware",
+  setupScript.includes("vfio-pci") &&
+    setupScript.includes("firmware-amd-graphics") &&
+    setupScript.includes("@@result=") &&
+    setupScript.includes("@@end"),
+);
 
 // ---- history ring buffer --------------------------------------------------
 const historyProbe = parseGpuProbe(`@@gpu
@@ -254,7 +338,7 @@ const inventory = parseGpuProbe(`@@gpu
 --amd
 @@end`);
 check("Unsupported display devices remain inventory-only", inventory.gpus.length === 1 && inventory.gpus[0].source === "inventory" && inventory.gpus[0].utilization === undefined, inventory.gpus[0]?.name);
-check("Inventory-only devices explain the missing telemetry", /telemetry driver/i.test(inventory.gpus[0]?.error ?? ""));
+check("Inventory-only devices explain the missing telemetry", /telemetry driver/i.test(inventory.gpus[0]?.error ?? ""), inventory.gpus[0]?.error);
 
 const failure = parseGpuProbe(`@@gpu
 nvidia_error=NVIDIA-SMI has failed because it could not communicate with the driver.

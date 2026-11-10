@@ -10,4 +10,4 @@
 # shell, no wildcard binary, no `bash -c`, no passwordless apt/systemctl.
 # Check what it grants with:
 #   sudo -l | grep nexus-priv
-@USER@ ALL=(root) NOPASSWD: /usr/local/sbin/nexus-priv service *, /usr/local/sbin/nexus-priv power *, /usr/local/sbin/nexus-priv backup *, /usr/local/sbin/nexus-priv guard *
+@USER@ ALL=(root) NOPASSWD: /usr/local/sbin/nexus-priv service *, /usr/local/sbin/nexus-priv power *, /usr/local/sbin/nexus-priv backup *, /usr/local/sbin/nexus-priv gpu *, /usr/local/sbin/nexus-priv guard *

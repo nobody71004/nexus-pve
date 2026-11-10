@@ -26,6 +26,7 @@ import { runRemote, toRunner } from "./probe";
 
 export const HELPER_PATH = "/usr/local/sbin/nexus-priv";
 export const SUDOERS_PATH = "/etc/sudoers.d/nexus-actions";
+export const GPU_SETUP_PATH = "/usr/local/lib/nexus-gpu-setup.sh";
 
 export type HelperInstallTrigger = "manual" | "auto";
 
@@ -65,6 +66,7 @@ export function helperAppRoot(): string {
 
 const RESOURCE_HELPER = "nexus-priv.sh";
 const RESOURCE_SUDOERS = "nexus-priv.sudoers";
+const RESOURCE_GPU_SETUP = "nexus-gpu-setup.sh";
 
 function resourcePath(appRoot: string, name: string): string {
   return path.join(appRoot, "resources", name);
@@ -143,7 +145,8 @@ function bootstrapScript(appRoot: string, host: StoredSshHost, asRoot: boolean):
     "# from the Nexus PVE project directory; root SSH not available? run the same",
     "# two install commands from the host console instead of over scp/ssh",
     `scp resources/${RESOURCE_HELPER} ${target}:/tmp/nexus-priv`,
-    `ssh ${target} 'install -o root -g root -m 0755 /tmp/nexus-priv ${HELPER_PATH} && rm -f /tmp/nexus-priv'`,
+    `scp resources/${RESOURCE_GPU_SETUP} ${target}:/tmp/nexus-gpu-setup.sh`,
+    `ssh ${target} 'install -o root -g root -m 0755 /tmp/nexus-priv ${HELPER_PATH} && install -o root -g root -m 0755 /tmp/nexus-gpu-setup.sh ${GPU_SETUP_PATH} && rm -f /tmp/nexus-priv /tmp/nexus-gpu-setup.sh'`
   ];
   if (!asRoot) {
     lines.push(
@@ -338,6 +341,9 @@ function b64(value: Buffer | string): string {
 
 function installScript(appRoot: string, user: string, helperSha: string, withSudoers: boolean): string {
   const helper = b64(readResource(appRoot, RESOURCE_HELPER));
+  const gpuSetupBuffer = readResource(appRoot, RESOURCE_GPU_SETUP);
+  const gpuSetup = b64(gpuSetupBuffer);
+  const gpuSetupSha = sha256(gpuSetupBuffer);
   const sudoers = b64(readResource(appRoot, RESOURCE_SUDOERS).toString("utf8").replaceAll("@USER@", user));
   const lines = [
     "set -u",
@@ -356,8 +362,18 @@ function installScript(appRoot: string, user: string, helperSha: string, withSud
     `if ! sh -n "$tmp"; then echo '@@fail=helper-syntax'; rm -f "$tmp"; exit 22; fi`,
     `install -o root -g root -m 0755 "$tmp" ${HELPER_PATH} || { rm -f "$tmp"; echo '@@fail=helper-install'; exit 23; }`,
     'rm -f "$tmp"',
+    `mkdir -p ${path.posix.dirname(GPU_SETUP_PATH)} || { echo '@@fail=gpu-setup-dir'; exit 24; }`,
+    `tmp=${GPU_SETUP_PATH}.tmp`,
+    `printf '%s' '${gpuSetup}' | decode >"$tmp" || { echo '@@fail=decode-gpu-setup'; rm -f "$tmp"; exit 25; }`,
+    `got=$(sha256sum "$tmp" 2>/dev/null | awk '{print $1}')`,
+    `if [ "$got" != '${gpuSetupSha}' ]; then echo '@@fail=gpu-setup-hash' "@@got=$got"; rm -f "$tmp"; exit 26; fi`,
+    `if ! sh -n "$tmp"; then echo '@@fail=gpu-setup-syntax'; rm -f "$tmp"; exit 27; fi`,
+    `install -o root -g root -m 0755 "$tmp" ${GPU_SETUP_PATH} || { rm -f "$tmp"; echo '@@fail=gpu-setup-install'; exit 28; }`,
+    'rm -f "$tmp"',
     `printf 'helper=installed\\n'`,
     'printf \'helper_sha=%s\\n\' "$(sha256sum ' + HELPER_PATH + ` | awk '{print $1}')"`,
+    `printf 'gpu_setup=installed\\n'`,
+    `printf 'gpu_setup_sha=%s\\n' "$(sha256sum ${GPU_SETUP_PATH} | awk '{print $1}')"`,
   ];
 
   if (withSudoers) {

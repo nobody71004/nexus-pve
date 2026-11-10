@@ -37,6 +37,7 @@ export const IPC = {
   sshAction: "nexus:ssh-action",
   sshHelper: "nexus:ssh-helper",
   sshHelperInstall: "nexus:ssh-helper-install",
+  sshGpuSetup: "nexus:ssh-gpu-setup",
   pveSnapshot: "nexus:pve-snapshot",
   pveVmDetail: "nexus:pve-vm-detail",
   pveVmAction: "nexus:pve-vm-action",

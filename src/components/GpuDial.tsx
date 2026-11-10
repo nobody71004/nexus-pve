@@ -1,6 +1,7 @@
 import { useEffect, useId, useState, type CSSProperties, type FormEvent } from "react";
 import type { GpuAlertThresholdOverride, GpuAlertThresholds, GpuInfo, GpuTelemetry } from "../../shared/types";
 import { evaluateGpuAlerts, gpuPowerPct, gpuVramPct } from "../../shared/gpu-alerts";
+import { bridge } from "../lib/bridge";
 import { bytes, cx } from "../lib/format";
 import {
   resetGpuAlertOverride,
@@ -542,6 +543,7 @@ export function GpuTelemetryPanel({
   className,
   hostKey,
   hostLabel,
+  hostId,
 }: {
   gpus: GpuTelemetry[];
   error?: string;
@@ -551,12 +553,35 @@ export function GpuTelemetryPanel({
   /** Stable key for this host's optional threshold override. */
   hostKey?: string;
   hostLabel?: string;
+  /** SSH host id used by the privileged GPU sensor repair. */
+  hostId?: string;
 }) {
   const [selected, setSelected] = useState(0);
+  const [repairing, setRepairing] = useState(false);
+  const [repairError, setRepairError] = useState<string>();
+  const [repairMessage, setRepairMessage] = useState<string>();
+  const [setupOutput, setSetupOutput] = useState<string>();
+  const [recovered, setRecovered] = useState<GpuTelemetry[]>([]);
   const thresholds = useGpuAlerts(hostKey);
   const globalThresholds = useGpuAlerts();
   const override = useGpuAlertOverride(hostKey);
-  const active = gpus[Math.min(selected, Math.max(0, gpus.length - 1))];
+  const liveGpus = (recovered.length > 0 ? recovered : gpus).filter((gpu) => gpu.source !== "inventory");
+  const inventoryByPci = new Map<string, { name: string; pci?: string; device?: string }>();
+  for (const gpu of inventory) {
+    const key = gpu.pci || gpu.name;
+    if (!inventoryByPci.has(key)) {
+      inventoryByPci.set(key, { name: gpu.name, pci: gpu.pci, device: gpu.device });
+    }
+  }
+  for (const gpu of gpus) {
+    if (gpu.source !== "inventory") continue;
+    const key = gpu.pci || gpu.id;
+    if (!inventoryByPci.has(key)) {
+      inventoryByPci.set(key, { name: gpu.name, ...(gpu.pci ? { pci: gpu.pci } : {}) });
+    }
+  }
+  const inventoryRows = [...inventoryByPci.values()];
+  const active = liveGpus[Math.min(selected, Math.max(0, liveGpus.length - 1))];
   const activeVram = active ? gpuVramPct(active) : undefined;
   const activePower = active ? gpuPowerPct(active) : undefined;
   const activeAlerts = active ? evaluateGpuAlerts(active, thresholds) : null;
@@ -577,13 +602,46 @@ export function GpuTelemetryPanel({
   }
 
   useEffect(() => {
-    setSelected((current) => Math.min(current, Math.max(0, gpus.length - 1)));
-  }, [gpus.length]);
+    setSelected((current) => Math.min(current, Math.max(0, liveGpus.length - 1)));
+  }, [liveGpus.length]);
 
-  if (gpus.length === 0 && inventory.length === 0 && !error) return null;
+  // Once the regular poll reports live counters, discard the one-shot result
+  // from the repair probe so history and live refresh take over again.
+  useEffect(() => {
+    if (gpus.some((gpu) => gpu.source !== "inventory")) {
+      setRecovered([]);
+      setRepairMessage(undefined);
+    }
+  }, [gpus]);
 
-  const count = gpus.length || inventory.length;
-  const heading = gpus.length
+  async function repairGpuSensors() {
+    if (!hostId || repairing) return;
+    setRepairing(true);
+    setRepairError(undefined);
+    setRepairMessage(undefined);
+    setSetupOutput(undefined);
+    try {
+      const result = await bridge.ssh.setupGpu(hostId);
+      setSetupOutput(result.output);
+      if (result.gpus.length > 0) setRecovered(result.gpus);
+      if (result.ok) {
+        setRepairMessage(
+          `GPU sensors installed and verified — ${result.gpus.length} live GPU${result.gpus.length === 1 ? "" : "s"} detected.`,
+        );
+      } else {
+        setRepairError(result.error ?? "GPU sensor setup failed.");
+      }
+    } catch (caught) {
+      setRepairError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setRepairing(false);
+    }
+  }
+
+  if (liveGpus.length === 0 && inventoryRows.length === 0 && !error) return null;
+
+  const count = liveGpus.length || inventoryRows.length;
+  const heading = liveGpus.length
     ? `${count} GPU${count === 1 ? "" : "s"} · live telemetry`
     : `${count} GPU${count === 1 ? "" : "s"} detected`;
 
@@ -597,14 +655,17 @@ export function GpuTelemetryPanel({
           <strong>{heading}</strong>
         </div>
         <div className="gpu-panel-meta">
-          {source ? <span title={source}>via {source}</span> : null}
+          {source && liveGpus.length > 0 ? <span title={source}>via {source}</span> : null}
           {active ? <span className={cx("gpu-panel-source", active.source === "inventory" && "inventory")}>{sourceLabel(active.source)}</span> : null}
         </div>
       </div>
 
-      {gpus.length > 1 ? (
+      {repairMessage ? <p className="gpu-setup-message">{repairMessage}</p> : null}
+      {repairError && liveGpus.length > 0 ? <p className="gpu-panel-error">{repairError}</p> : null}
+
+      {liveGpus.length > 1 ? (
         <div className="gpu-tabs" role="tablist" aria-label="GPU selection">
-          {gpus.map((gpu, index) => (
+          {liveGpus.map((gpu, index) => (
             <button
               key={gpu.id}
               type="button"
@@ -765,10 +826,10 @@ export function GpuTelemetryPanel({
         <div className="gpu-empty">
           <Icon name="cpu" size={18} />
           <div>
-            <strong>{inventory.length ? "GPU inventory only" : "No live GPU telemetry"}</strong>
-            {inventory.length ? (
+            <strong>{inventoryRows.length ? "GPU inventory only" : "No live GPU telemetry"}</strong>
+            {inventoryRows.length ? (
               <div className="gpu-inventory">
-                {inventory.map((gpu) => (
+                {inventoryRows.map((gpu) => (
                   <span key={`${gpu.pci}-${gpu.device}`}>
                     <strong>{gpu.name}</strong>
                     <em className="mono">{gpu.pci}</em>
@@ -777,11 +838,28 @@ export function GpuTelemetryPanel({
               </div>
             ) : null}
             <p>{error ?? "The host did not report a supported NVIDIA or AMD GPU."}</p>
+            {hostId ? (
+              <div className="gpu-setup">
+                <button type="button" className="gpu-setup-button" onClick={() => void repairGpuSensors()} disabled={repairing}>
+                  {repairing ? "Detecting and installing GPU sensors…" : "Auto-install GPU sensors"}
+                </button>
+                <em>
+                  Detects the GPU, installs sensor tools and AMD firmware, loads amdgpu, then verifies live counters. Cards assigned to a VM are skipped.
+                </em>
+                {repairError ? <span className="gpu-setup-error">{repairError}</span> : null}
+                {setupOutput ? (
+                  <details className="gpu-setup-log">
+                    <summary>Setup log</summary>
+                    <pre>{setupOutput}</pre>
+                  </details>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
       )}
 
-      {error && active && !active.error ? <p className="gpu-panel-error">{error}</p> : null}
+      {error && active && !active.error && recovered.length === 0 ? <p className="gpu-panel-error">{error}</p> : null}
     </section>
   );
 }

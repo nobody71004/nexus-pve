@@ -38,6 +38,7 @@ import { RelayFabric } from "./components/RelayFabric";
 import { TitleBar } from "./components/TitleBar";
 import { Modal, Panel, Skeleton, StatTile, StatusDot, Toasts, type ToastItem } from "./components/ui";
 import { SecurityWorkspace } from "./components/SecurityWorkspace";
+import { SettingsModal } from "./components/SettingsModal";
 import { TeamPanel } from "./components/TeamPanel";
 import { Throughput } from "./components/Throughput";
 import { VmDrawer } from "./components/VmDrawer";
@@ -45,6 +46,7 @@ import { VmTable } from "./components/VmTable";
 import { bridge, isMockBridge } from "./lib/bridge";
 import { ago, bytes, clock, cx, pct } from "./lib/format";
 import { helperAlertBreakdown, helperAlertCount, helperFleet, refreshHelpers, subscribeHelpers } from "./lib/helperFleet";
+import { UI_SCALE_DEFAULT, normalizeUiScale } from "../shared/ui-scale";
 
 type Tab = "overview" | "hosts" | "network" | "security" | "fabric" | "praetor" | "backups" | "pipelines" | "connections" | "team";
 
@@ -196,6 +198,8 @@ function Workspace({
   const [error, setError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [motion, setMotion] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [uiScale, setUiScale] = useState(UI_SCALE_DEFAULT);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [drawerVm, setDrawerVm] = useState<VmSummary | null>(null);
   const [drawerNonce, setDrawerNonce] = useState(0);
@@ -215,6 +219,8 @@ function Workspace({
   const [archiveBusy, setArchiveBusy] = useState(false);
   const toastTimers = useRef<number[]>([]);
   const sshInflight = useRef(false);
+  const scaleSaveTimer = useRef<number | null>(null);
+  const scaleLoaded = useRef(false);
 
   const notify = useCallback((level: ToastItem["level"], title: string, detail?: string) => {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -249,23 +255,32 @@ function Workspace({
     return () => toastTimers.current.forEach((timer) => window.clearTimeout(timer));
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (scaleSaveTimer.current !== null) window.clearTimeout(scaleSaveTimer.current);
+    };
+  }, []);
+
   /* ------------------------------------------------------------- bootstrap */
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const [hostList, appInfo, pipelineList, mcpStatus] = await Promise.all([
+        const [hostList, appInfo, pipelineList, mcpStatus, appSettings] = await Promise.all([
           bridge.hosts.list(),
           bridge.app.info(),
           bridge.pipelines.list(),
           bridge.mcp.status(),
+          bridge.settings.get(),
         ]);
         if (cancelled) return;
         setHosts(hostList);
         setInfo(appInfo);
         setPipelines(pipelineList);
         setMcp(mcpStatus);
+        setUiScale(appSettings.uiScale);
+        scaleLoaded.current = true;
         const stored = localStorage.getItem("nexus.activeHost");
         const preferred = hostList.find((host) => host.id === stored) ?? hostList[0];
         setActiveHostId(preferred?.id ?? null);
@@ -853,6 +868,25 @@ function Workspace({
     });
   }, []);
 
+  const changeUiScale = useCallback(
+    (value: number) => {
+      const next = normalizeUiScale(value);
+      setUiScale(next);
+      if (!scaleLoaded.current) return;
+      if (scaleSaveTimer.current !== null) window.clearTimeout(scaleSaveTimer.current);
+      scaleSaveTimer.current = window.setTimeout(() => {
+        scaleSaveTimer.current = null;
+        void bridge.settings
+          .save({ uiScale: next })
+          .then((saved) => setUiScale(saved.uiScale))
+          .catch((err) =>
+            notify("error", "Could not save UI scale", err instanceof Error ? err.message : String(err)),
+          );
+      }, 160);
+    },
+    [notify],
+  );
+
   /* ---------------------------------------------------------------- derived */
 
   const nodes = snapshot?.nodes ?? [];
@@ -943,7 +977,13 @@ function Workspace({
   return (
     <div className="app">
       <Backdrop reduced={!motion} />
-      <TitleBar health={health} onPalette={() => setPaletteOpen(true)} motion={motion} onToggleMotion={toggleMotion} />
+      <TitleBar
+        health={health}
+        onPalette={() => setPaletteOpen(true)}
+        onSettings={() => setSettingsOpen(true)}
+        motion={motion}
+        onToggleMotion={toggleMotion}
+      />
 
       <div className="shell">
         <nav className="rail">
@@ -1453,6 +1493,10 @@ function Workspace({
       </div>
 
       {paletteOpen ? <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} /> : null}
+
+      {settingsOpen ? (
+        <SettingsModal scale={uiScale} onChange={changeUiScale} onClose={() => setSettingsOpen(false)} />
+      ) : null}
 
       {drawerVm && activeHostId ? (
         <VmDrawer

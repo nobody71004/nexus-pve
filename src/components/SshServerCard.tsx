@@ -189,6 +189,7 @@ export function SshServerCard({
         error={snapshot?.gpuError}
         hostKey={gpuHostKey}
         hostLabel={host.label}
+        hostId={host.id}
       />
 
       <div className="node-foot">

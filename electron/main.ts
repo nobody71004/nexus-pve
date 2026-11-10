@@ -7,6 +7,7 @@ import { registerIpc } from "./ipc";
 import { createRuntime, mcpServerPath, type Runtime } from "./agent/runtime";
 import { TeamService } from "./team/store";
 import { TeamSyncService } from "./team/sync";
+import { UI_SCALE_DEFAULT } from "../shared/ui-scale";
 
 app.setName("NexusPVE");
 const smokeUserData = process.env.NEXUS_PVE_SMOKE_USER_DATA;
@@ -50,6 +51,12 @@ function broadcast(event: NexusEvent): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send(IPC.event, event);
   }
+}
+
+function applyUiScale(win: BrowserWindow): void {
+  if (win.isDestroyed()) return;
+  const scale = appRuntime?.store.settings().uiScale ?? UI_SCALE_DEFAULT;
+  win.webContents.setZoomFactor(scale / 100);
 }
 
 function writeSmokeReport(report: Record<string, unknown>): void {
@@ -155,6 +162,11 @@ function createWindow(): void {
       spellcheck: false,
       devTools: !app.isPackaged,
     },
+  });
+
+  applyUiScale(window);
+  window.webContents.on("did-finish-load", () => {
+    if (window && !window.isDestroyed()) applyUiScale(window);
   });
 
   if (smokeReportPath) void attachSmokeReport(window);

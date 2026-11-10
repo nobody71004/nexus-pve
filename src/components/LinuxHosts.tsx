@@ -923,6 +923,7 @@ export function LinuxHosts({
                     error={snapshot.gpuError}
                     hostKey={sshGpuAlertHostKey(activeHost.id)}
                     hostLabel={activeHost.label}
+                    hostId={activeHost.id}
                   />
 
                   <div className="dial-row">

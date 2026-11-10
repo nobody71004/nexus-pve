@@ -6,11 +6,13 @@ import { Icon } from "./Icon";
 export function TitleBar({
   health,
   onPalette,
+  onSettings,
   motion,
   onToggleMotion,
 }: {
   health: "online" | "degraded" | "offline" | "connecting";
   onPalette: () => void;
+  onSettings: () => void;
   motion: boolean;
   onToggleMotion: () => void;
 }) {
@@ -51,6 +53,9 @@ export function TitleBar({
           {health === "online" ? "SECURE LINK" : health.toUpperCase()}
         </span>
         <span className="titlebar-clock">{clock(now)}</span>
+        <button className="btn icon ghost" onClick={onSettings} title="Interface settings" aria-label="Interface settings">
+          <Icon name="settings" size={14} />
+        </button>
         <button className={motion ? "btn icon ghost active" : "btn icon ghost"} onClick={onToggleMotion} title="Toggle effects">
           <Icon name="zap" size={14} />
         </button>

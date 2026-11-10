@@ -38,6 +38,7 @@ import {
 } from "./ssh/collect";
 import { actOnSshHost, runSpeedTest, runSpeedTestAll } from "./ssh/actions";
 import { checkHelper, installHelper } from "./ssh/helper";
+import { setupGpuSensors } from "./ssh/gpu-setup";
 import { guardian } from "./security/guardian";
 import { sshKeys } from "./sshkeys/service";
 import { ddos } from "./ddos/service";
@@ -107,9 +108,12 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
   }));
 
   ipcMain.handle(IPC.settingsGet, () => store.settings());
-  ipcMain.handle(IPC.settingsSave, (_event, patch: Partial<AppSettings> | undefined) =>
-    store.setSettings(patch ?? {}),
-  );
+  ipcMain.handle(IPC.settingsSave, (event, patch: Partial<AppSettings> | undefined) => {
+    const saved = store.setSettings(patch ?? {});
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win && !win.isDestroyed()) win.webContents.setZoomFactor(saved.uiScale / 100);
+    return saved;
+  });
 
   ipcMain.handle(IPC.appWindow, (event, action: unknown) => {
     const win = BrowserWindow.fromWebContents(event.sender);
@@ -291,6 +295,11 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
     return installHelper(store, app.getAppPath(), id, typeof sudoPassword === "string" ? sudoPassword : undefined, {
       trigger: "manual",
     });
+  });
+  ipcMain.handle(IPC.sshGpuSetup, (_event, hostId: unknown) => {
+    const id = str(hostId, "host id");
+    guardSshHost(id);
+    return setupGpuSensors(store, app.getAppPath(), id);
   });
 
   ipcMain.handle(IPC.sshKeysOverview, () => {

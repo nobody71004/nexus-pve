@@ -4,6 +4,7 @@ import path from "node:path";
 import { configPath, nexusHome } from "./paths";
 import { decryptSecret, encryptSecret } from "./vault";
 import { DEFAULT_GPU_ALERTS, normalizeGpuAlertOverrides, sshGpuAlertHostKey } from "../shared/gpu-alerts";
+import { UI_SCALE_DEFAULT, normalizeUiScale } from "../shared/ui-scale";
 import type { AppSettings, HostInput, HostSummary, SshHostInput, SshHostSummary } from "../shared/types";
 
 export interface StoredHost extends HostSummary {
@@ -31,6 +32,7 @@ export interface StoredConfig {
 const DEFAULTS: AppSettings = {
   pollMs: 8000,
   accent: "cyan",
+  uiScale: UI_SCALE_DEFAULT,
   reduceMotion: false,
   confirmDestructive: true,
   gpuAlerts: { ...DEFAULT_GPU_ALERTS },
@@ -49,6 +51,7 @@ export function normalizeSettings(input: Partial<AppSettings> | undefined): AppS
   return {
     pollMs: clampNumber(raw.pollMs, 2_000, 120_000, DEFAULTS.pollMs),
     accent: raw.accent === "violet" || raw.accent === "amber" ? raw.accent : "cyan",
+    uiScale: normalizeUiScale(raw.uiScale),
     reduceMotion: raw.reduceMotion === true,
     confirmDestructive: raw.confirmDestructive !== false,
     gpuAlerts: {

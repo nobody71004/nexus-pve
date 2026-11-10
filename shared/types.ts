@@ -314,6 +314,8 @@ export interface NodeStats {
   gpuTelemetryError?: string;
   /** Configured SSH host that supplied gpuTelemetry. */
   gpuTelemetryHost?: string;
+  /** Stable id of that SSH host, used for one-click sensor repair. */
+  gpuTelemetryHostId?: string;
   network: NicInfo[];
   sensors: SensorReading[];
   rrd: RrdPoint[];
@@ -747,6 +749,15 @@ export interface SshSecurity {
   permitRootLogin?: string;
 }
 
+export interface GpuSetupResult {
+  hostId: string;
+  ok: boolean;
+  /** Live GPUs found by the verification probe after the repair. */
+  gpus: GpuTelemetry[];
+  output: string;
+  error?: string;
+}
+
 export interface SshExecResult {
   host: string;
   ok: boolean;
@@ -958,6 +969,7 @@ export interface NexusEvent {
 export interface AppSettings {
   pollMs: number;
   accent: "cyan" | "violet" | "amber";
+  uiScale: number;
   reduceMotion: boolean;
   confirmDestructive: boolean;
   gpuAlerts: GpuAlertThresholds;
@@ -1050,6 +1062,8 @@ export interface NexusBridge {
     helper(hostId: string): Promise<HelperStatus>;
     /** sudoPassword is used once for `sudo -S` and never persisted. */
     installHelper(hostId: string, sudoPassword?: string): Promise<HelperInstallResult>;
+    /** Detect the host OS/GPU, install sensor packages and verify telemetry. */
+    setupGpu(hostId: string): Promise<GpuSetupResult>;
   };
   sshkeys: {
     overview(): Promise<SshKeyOverview>;

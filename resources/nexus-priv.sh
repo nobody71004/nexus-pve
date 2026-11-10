@@ -9,6 +9,7 @@
 #   nexus-priv service <start|stop|restart> <unit>
 #   nexus-priv power <reboot|shutdown>
 #   nexus-priv backup <slug> <path> [path...]
+#   nexus-priv gpu setup
 #   nexus-priv guard collect
 #   nexus-priv guard apply <remediation-id>
 #   nexus-priv guard ban <address>
@@ -25,6 +26,7 @@ export LC_ALL=C
 umask 077
 
 DEST=/var/backups/nexus
+GPU_SETUP_PATH=/usr/local/lib/nexus-gpu-setup.sh
 KEEP=3
 GUARD_LIB=/usr/local/lib/nexus-guard
 GUARD_ETC=/etc/nexus-guard
@@ -46,6 +48,7 @@ usage:
   nexus-priv service <start|stop|restart> <unit>
   nexus-priv power <reboot|shutdown>
   nexus-priv backup <slug> <path> [path...]
+  nexus-priv gpu setup
   nexus-priv guard collect
   nexus-priv guard apply <remediation-id>
   nexus-priv guard ban <address>
@@ -860,6 +863,11 @@ power)
   ( sleep 2; systemctl "$verb" ) >/dev/null 2>&1 &
   printf 'scheduled=%s\n' "$verb"
   exit 0
+  ;;
+gpu)
+  [ $# -eq 1 ] && [ "$1" = "setup" ] || usage
+  [ -x "$GPU_SETUP_PATH" ] || die "GPU setup helper is missing; reinstall the privileged helper from Nexus"
+  exec "$GPU_SETUP_PATH"
   ;;
 backup)
   [ $# -ge 2 ] || usage

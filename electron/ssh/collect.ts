@@ -8,6 +8,11 @@ const CACHE_MS = 1500;
 const cache = new Map<string, { at: number; value: SshSnapshot }>();
 const GPU_CACHE_MS = 4000;
 const gpuCache = new Map<string, { at: number; value: { gpus: GpuTelemetry[]; error?: string } }>();
+
+/** A successful repair must not be hidden by the short telemetry cache. */
+export function invalidateSshGpuCache(id: string): void {
+  gpuCache.delete(id);
+}
 const PVE_TEMP_CACHE_MS = 15_000;
 const pveTempCache = new Map<string, { at: number; value: SensorReading[] }>();
 
@@ -213,6 +218,7 @@ export async function collectPveNodeGpuTelemetry(
     return;
   }
   node.gpuTelemetryHost = match.label;
+  node.gpuTelemetryHostId = match.id;
   try {
     const result = await collectSshGpuTelemetry(store, match.id);
     node.gpuTelemetry = result.gpus;

@@ -1,7 +1,7 @@
 {
   "name": "nexus-pve",
   "productName": "NexusPVE",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "Nexus PVE — multi-host Proxmox fleet console with backup studio and an approval-gated agent/MCP pipeline.",
   "private": true,
   "main": "dist-electron/main.cjs",
@@ -31,11 +31,12 @@
     "smoke:sshkeys": "node scripts/sshkey-smoke.mjs",
     "verify:packaged": "npm run package:dir && npm run smoke:packaged",
     "test": "node tests/run-edge-tests.mjs",
-    "preflight": "npm run typecheck && npm run build && npm test && npm run smoke && npm run smoke:gpu && npm run smoke:hardware && npm run smoke:sshkeys && npm run smoke:agent-fabric",
+    "preflight": "npm run typecheck && npm run build && npm test && npm run smoke && npm run smoke:gpu && npm run smoke:ui-scale && npm run smoke:hardware && npm run smoke:sshkeys && npm run smoke:agent-fabric",
     "ui:mock": "vite --port 5173",
     "preflight:local": "node scripts/local-preflight.mjs",
     "preflight:local:packaged": "node scripts/local-preflight.mjs --packaged",
     "smoke:gpu": "node scripts/gpu-smoke.mjs",
+    "smoke:ui-scale": "node scripts/ui-scale-smoke.mjs",
     "smoke:hardware": "node scripts/hardware-smoke.mjs"
   },
   "devDependencies": {
@@ -95,9 +96,6 @@
         }
       ],
       "artifactName": "NexusPVE-${version}-portable.${ext}"
-    },
-    "portable": {
-      "unpackDirName": "NexusPVE"
     }
   },
   "engines": {

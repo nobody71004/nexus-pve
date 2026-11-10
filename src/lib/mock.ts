@@ -1,4 +1,5 @@
 import { DEFAULT_GPU_ALERTS } from "../../shared/gpu-alerts";
+import { UI_SCALE_DEFAULT, normalizeUiScale } from "../../shared/ui-scale";
 import type {
   AppSettings,
   BackupArchive,
@@ -285,7 +286,7 @@ function makeNode(hostId: string, name: string, index: number, diskUsed: number)
       ? [{ name: "NVIDIA RTX A4000", vendor: "NVIDIA Corporation", device: "GA104GL [RTX A4000]", pci: "0000:41:00.0", className: "VGA compatible controller", iommuGroup: 22 }]
       : [],
     gpuTelemetry: hostId === "host-lab" && index === 0 ? [mockGpuTelemetry("nvidia")] : [],
-    ...(hostId === "host-lab" && index === 0 ? { gpuTelemetryHost: "pve-hyperion" } : {}),
+    ...(hostId === "host-lab" && index === 0 ? { gpuTelemetryHost: "pve-hyperion", gpuTelemetryHostId: "host-lab" } : {}),
     disks: [
       {
         dev: "/dev/nvme0n1",
@@ -1425,6 +1426,7 @@ export function createMockBridge(): NexusBridge {
   let mockSettings: AppSettings = {
     pollMs: 8000,
     accent: "cyan",
+    uiScale: UI_SCALE_DEFAULT,
     reduceMotion: false,
     confirmDestructive: true,
     gpuAlerts: { ...DEFAULT_GPU_ALERTS },
@@ -1456,7 +1458,7 @@ export function createMockBridge(): NexusBridge {
   return {
     app: {
       info: async () => ({
-        version: "1.0.10",
+        version: "1.0.11",
         electron: "33.4.11",
         node: "20.18.1",
         chrome: "130.0.6723.152",
@@ -1474,6 +1476,7 @@ export function createMockBridge(): NexusBridge {
         mockSettings = {
           ...mockSettings,
           ...patch,
+          uiScale: normalizeUiScale(patch.uiScale ?? mockSettings.uiScale),
           gpuAlerts: { ...mockSettings.gpuAlerts, ...(patch.gpuAlerts ?? {}) },
         };
         return mockSettings;
@@ -1801,6 +1804,16 @@ export function createMockBridge(): NexusBridge {
           route: status.route,
           output: `helper=installed\nsudoers=installed\nvisudo: parsed OK\n@@done`,
           status,
+        };
+      },
+      setupGpu: async (hostId: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        const host = sshHosts.find((entry) => entry.id === hostId) ?? sshHosts[0];
+        return {
+          hostId: host.id,
+          ok: true,
+          gpus: [mockGpuTelemetry("amd")],
+          output: `os_package_manager=apt\nsensor_tools=installed\ngpu=0000:05:00.0 vendor=amd driver=amdgpu action=ready hwmon=/sys/class/hwmon/hwmon3\nresult=ok\n@@end`,
         };
       },
     },

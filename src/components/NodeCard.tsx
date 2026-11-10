@@ -410,6 +410,7 @@ export function NodeCard({ node, endpoint }: { node: NodeStats; endpoint?: HostS
         source={node.gpuTelemetryHost}
         hostKey={gpuHostKey}
         hostLabel={node.node}
+        hostId={node.gpuTelemetryHostId}
       />
 
       <div className="node-foot">
