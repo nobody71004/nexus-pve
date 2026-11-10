@@ -103,7 +103,7 @@ The portable target is Windows 10/11 x64. It requires no installer and no system
 - **Layout and scaling** — Fleet cards use the full dashboard width, UI scale is configurable from 75–150%, and the labelled sidebar remains visible through normal desktop widths instead of collapsing early.
 - **Portable updates** — The portable target no longer pins extraction to a shared temporary folder, so a stale copy of an older build cannot be reused after an upgrade.
 - **Verification** — Typecheck, production build, edge tests, agent/MCP smoke, GPU parser smoke, UI-scale smoke, hardware/SSH-key/Agent Fabric smoke, and packaged smoke pass.
-- **Asset** — [`NexusPVE-1.0.11-portable.exe`](https://github.com/nobody71004/nexus-pve/releases/download/v1.0.11/NexusPVE-1.0.11-portable.exe)(117,568,306 bytes), SHA-256 `d4ba4074ab78e27cd9324d9acb35fae53c9365aedbedb341d01c530f9cd3d947`. It is unsigned.
+- **Asset** — [`NexusPVE-1.0.11-portable.exe`](https://github.com/nobody71004/nexus-pve/releases/download/v1.0.11/NexusPVE-1.0.11-portable.exe) (117,568,306 bytes), SHA-256 `d4ba4074ab78e27cd9324d9acb35fae53c9365aedbedb341d01c530f9cd3d947`. It is unsigned.
 
 ### Release 1.0.9
 
