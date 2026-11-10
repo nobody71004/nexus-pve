@@ -19,6 +19,8 @@ import { Icon } from "./Icon";
 import { SshTerminal } from "./SshTerminal";
 import { VncConsole } from "./VncConsole";
 import { Chip, Gauge, Modal, Panel, Skeleton, Sparkline, StatusDot, type Tone } from "./ui";
+import { GpuTelemetryPanel } from "./GpuDial";
+import { ServerHardware } from "./ServerHardware";
 
 const EMPTY: SshHostInput = {
   label: "",
@@ -895,8 +897,12 @@ export function LinuxHosts({
                     </div>
                     <div>
                       <span className="eyebrow">PROCESSOR</span>
-                      <strong>{snapshot.cpu.cores} threads</strong>
-                      <em className="mono">{snapshot.cpu.model.slice(0, 34) || "unknown"}</em>
+                      <strong>
+                        {snapshot.cpu.physicalCores
+                          ? `${snapshot.cpu.physicalCores} cores / ${snapshot.cpu.cores} threads`
+                          : `${snapshot.cpu.cores} threads`}
+                      </strong>
+                      <em className="mono" title={snapshot.cpu.model}>{snapshot.cpu.model.slice(0, 34) || "unknown"}</em>
                     </div>
                     <div>
                       <span className="eyebrow">SSH</span>
@@ -908,6 +914,10 @@ export function LinuxHosts({
                       </em>
                     </div>
                   </div>
+
+                  <ServerHardware snapshot={snapshot} />
+
+                  <GpuTelemetryPanel gpus={snapshot.gpus ?? []} error={snapshot.gpuError} />
 
                   <div className="dial-row">
                     {dials.map((dial) => (

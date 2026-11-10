@@ -40,6 +40,11 @@ interface RawNodeStatus {
   rootfs?: { used?: number; free?: number; total?: number; avail?: number };
   pveversion?: string;
   "current-kernel"?: { version?: string; "machine-type"?: string };
+  /** PVE-mods injects `sensors -j` into the node status as a JSON string. */
+  sensorsOutput?: unknown;
+  thermalstate?: unknown;
+  PveMod_JsonSensorInfo?: unknown;
+  sensors?: unknown;
 }
 
 interface RawResource {
@@ -113,7 +118,7 @@ export async function fetchNodes(client: PveClient): Promise<RawNode[]> {
 
 export async function fetchNodeStats(client: PveClient, node: string, summary?: RawNode): Promise<NodeStats> {
   const started = Date.now();
-  const [status, rrd, storages, disks, network, sensors, pci] = await Promise.allSettled([
+  const [status, rrd, storages, disks, network, legacySensors, cpuSensors, pci] = await Promise.allSettled([
     client.get<RawNodeStatus>(`/nodes/${enc(node)}/status`),
     client.get<Record<string, number | string | null>[]>(`/nodes/${enc(node)}/rrddata`, {
       timeframe: "hour",
@@ -122,7 +127,10 @@ export async function fetchNodeStats(client: PveClient, node: string, summary?: 
     client.get<Record<string, unknown>[]>(`/nodes/${enc(node)}/storage`),
     client.get<Record<string, unknown>[]>(`/nodes/${enc(node)}/disks/list`),
     client.get<Record<string, unknown>[]>(`/nodes/${enc(node)}/network`),
-    client.get<Record<string, unknown[]>>(`/nodes/${enc(node)}/sensors`),
+    // Some sensor forks expose a dedicated endpoint; stock PVE does not.
+    client.get<unknown>(`/nodes/${enc(node)}/sensors`),
+    // PVE 9 native hardware sensors (Sys.Audit).
+    client.get<unknown>(`/nodes/${enc(node)}/hardware/sensors/temperature/cpu`),
     client.get<Record<string, unknown>[]>(`/nodes/${enc(node)}/hardware/pci`, { verbose: 1 }),
   ]);
 
@@ -173,8 +181,18 @@ export async function fetchNodeStats(client: PveClient, node: string, summary?: 
     disks: value(disks, []).map(normalizeDisk),
     gpus,
     ...(gpuError ? { gpuError } : {}),
+    gpuTelemetry: [],
     network: value(network, []).map(normalizeNic),
-    sensors: flattenSensors(value(sensors, {})),
+    sensors: mergeSensors([
+      ...flattenSensors(value(legacySensors, null)),
+      ...flattenSensors(value(cpuSensors, null)),
+      // PVE-mods writes lm-sensors JSON into the node status instead of a
+      // dedicated endpoint, under one of these field names depending on fork.
+      ...flattenSensors(s.sensorsOutput),
+      ...flattenSensors(s.thermalstate),
+      ...flattenSensors(s.PveMod_JsonSensorInfo),
+      ...flattenSensors(s.sensors),
+    ]),
     rrd: points.map(normalizeRrdPoint).filter((p) => p.t > 0),
     vmCount: 0,
     runningCount: 0,
@@ -243,21 +261,138 @@ function normalizeNic(raw: Record<string, unknown>): NicInfo {
   };
 }
 
-function flattenSensors(raw: Record<string, unknown[]>): SensorReading[] {
-  const readings: SensorReading[] = [];
-  for (const group of Object.values(raw ?? {})) {
-    if (!Array.isArray(group)) continue;
-    for (const entry of group as Record<string, unknown>[]) {
-      const value = Number(entry.value);
-      if (!Number.isFinite(value)) continue;
-      readings.push({
-        name: String(entry.name ?? entry.label ?? "sensor"),
-        value,
-        unit: String(entry.unit ?? ""),
-      });
+const TEMP_INPUT_KEY = /^temp\d+_input$/i;
+const TEMP_META_KEY = /^temp\d+_(?:max|min|crit|crit_alarm|alarm|lcrit|emergency|offset)$/i;
+const DIRECT_VALUE_KEYS = ["value", "temperature", "reading", "temp", "celsius", "temp1_input"] as const;
+
+function parseNumber(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const match = /-?\d+(?:\.\d+)?/.exec(value);
+  if (!match) return null;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function cleanSensorName(raw: string): string {
+  return raw.replace(/^.*\//, "").replace(/\s+/g, " ").trim().slice(0, 64) || "sensor";
+}
+
+function normalizeUnit(unit: unknown, name: string): string {
+  const raw = typeof unit === "string" ? unit.trim() : "";
+  if (!raw) return /temp|package|tctl|tdie|core|cpu|thermal/i.test(name) ? "°C" : "";
+  if (/^(?:c|celsius|degrees?\s*c(?:elsius)?|°c)$/i.test(raw)) return "°C";
+  if (/^(?:f|fahrenheit|degrees?\s*f(?:ahrenheit)?|°f)$/i.test(raw)) return "°F";
+  return raw;
+}
+
+function readDirectSensor(record: Record<string, unknown>, fallbackName: string): SensorReading | null {
+  for (const key of DIRECT_VALUE_KEYS) {
+    if (!(key in record)) continue;
+    const numeric = parseNumber(record[key]);
+    if (numeric === null) continue;
+    const name = cleanSensorName(String((record.name ?? record.label ?? record.sensor ?? fallbackName) || "sensor"));
+    return { name, value: numeric, unit: normalizeUnit(record.unit, name) };
+  }
+  return null;
+}
+
+function tryParseJson(text: string): unknown {
+  let current: unknown = text;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (typeof current !== "string") return current;
+    try {
+      current = JSON.parse(current);
+    } catch {
+      return undefined;
     }
   }
-  return readings.slice(0, 16);
+  return current;
+}
+
+/** Plain `sensors` output, e.g. "Package id 0:  +45.0°C  (high = +80.0°C)". */
+function collectPlainSensorText(text: string, out: SensorReading[]): void {
+  for (const line of text.split(/\r?\n/)) {
+    const match = /^([^:]{2,48}):\s*\+?(-?\d+(?:\.\d+)?)\s*°\s*C\b/i.exec(line.trim());
+    if (!match) continue;
+    const name = cleanSensorName(match[1]);
+    if (!/temp|package|tctl|tdie|core|cpu|thermal/i.test(name)) continue;
+    const value = Number(match[2]);
+    if (!Number.isFinite(value) || value < -40 || value > 200) continue;
+    out.push({ name, value, unit: "°C" });
+  }
+}
+
+/**
+ * Proxmox sensor payloads are not uniform: nested `sensors -j` objects,
+ * `{name,value,unit}` arrays, PVE 9 `{sensor,temperature,unit}` arrays, or a
+ * JSON string embedded in /status. Walk all of them without inventing values.
+ */
+function collectSensors(raw: unknown, path: string[], out: SensorReading[], depth = 0): void {
+  if (raw === null || raw === undefined || depth > 8) return;
+  if (typeof raw === "string") {
+    const text = raw.trim();
+    if (!text) return;
+    if (text.startsWith("{") || text.startsWith("[")) {
+      const parsed = tryParseJson(text);
+      if (parsed !== undefined) collectSensors(parsed, path, out, depth + 1);
+      return;
+    }
+    collectPlainSensorText(text, out);
+    return;
+  }
+  if (Array.isArray(raw)) {
+    for (const entry of raw) collectSensors(entry, path, out, depth + 1);
+    return;
+  }
+  if (typeof raw !== "object") return;
+
+  const record = raw as Record<string, unknown>;
+  const direct = readDirectSensor(record, path[path.length - 1] ?? "");
+  if (direct) {
+    out.push(direct);
+    return;
+  }
+  for (const [key, child] of Object.entries(record)) {
+    if (TEMP_META_KEY.test(key)) continue;
+    if (TEMP_INPUT_KEY.test(key)) {
+      const numeric = parseNumber(child);
+      if (numeric === null) continue;
+      const name = cleanSensorName(path[path.length - 1] || "sensor");
+      out.push({ name, value: numeric, unit: "°C" });
+      continue;
+    }
+    collectSensors(child, [...path, key], out, depth + 1);
+  }
+}
+
+function sensorRank(reading: SensorReading): number {
+  const name = reading.name.toLowerCase();
+  if (/package|socket|pkg/.test(name)) return 0;
+  if (/tctl|tdie/.test(name)) return 1;
+  if (/cpu|core|k10temp|coretemp|peci|tccd|soc/.test(name)) return 2;
+  if (/°c|celsius|temp|thermal|nvme|composite|acpitz/.test(`${reading.unit} ${name}`.toLowerCase())) return 3;
+  return 4;
+}
+
+function mergeSensors(readings: SensorReading[]): SensorReading[] {
+  const seen = new Set<string>();
+  const merged: SensorReading[] = [];
+  for (const reading of readings) {
+    if (!reading || !Number.isFinite(reading.value)) continue;
+    if (reading.value < -1000 || reading.value > 100000) continue;
+    const key = `${reading.name.toLowerCase()}|${reading.unit}|${reading.value}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(reading);
+  }
+  return merged.sort((a, b) => sensorRank(a) - sensorRank(b) || b.value - a.value).slice(0, 32);
+}
+
+function flattenSensors(raw: unknown): SensorReading[] {
+  const readings: SensorReading[] = [];
+  collectSensors(raw, [], readings);
+  return mergeSensors(readings);
 }
 
 function normalizeRrdPoint(raw: Record<string, number | string | null>): RrdPoint {

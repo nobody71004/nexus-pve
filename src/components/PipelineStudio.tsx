@@ -56,7 +56,7 @@ export function PipelineStudio({
   onWriteMcp: (target: "claude" | "cursor" | "vscode") => Promise<void>;
   onCopy: (text: string) => void;
 }) {
-  const [vars, setVars] = useState<Record<string, { storage: string; note: string }>>({});
+  const [vars, setVars] = useState<Record<string, { storage: string; note: string; command: string }>>({});
   const [busy, setBusy] = useState<string | null>(null);
 
   const grouped = useMemo(() => {
@@ -69,7 +69,12 @@ export function PipelineStudio({
     return [...map.entries()];
   }, [pipelines]);
 
-  const valueFor = (id: string) => vars[id] ?? { storage: storageOptions[0] ?? "", note: "" };
+  const valueFor = (id: string) =>
+    vars[id] ?? {
+      storage: storageOptions[0] ?? "",
+      note: "",
+      command: id === "fleet-command" ? "uptime" : "",
+    };
 
   return (
     <div className="pipeline-layout">
@@ -133,6 +138,18 @@ export function PipelineStudio({
                         />
                       </label>
                     ) : null}
+                    {def.id === "fleet-command" ? (
+                      <label className="field compact">
+                        <span>Command</span>
+                        <input
+                          placeholder="uptime"
+                          value={current.command}
+                          onChange={(event) =>
+                            setVars((previous) => ({ ...previous, [def.id]: { ...current, command: event.target.value } }))
+                          }
+                        />
+                      </label>
+                    ) : null}
                     <footer>
                       <button
                         className="btn small primary"
@@ -143,6 +160,7 @@ export function PipelineStudio({
                             await onRun(def, {
                               storage: current.storage || undefined,
                               note: current.note || undefined,
+                              command: current.command || undefined,
                             });
                           } finally {
                             setBusy(null);

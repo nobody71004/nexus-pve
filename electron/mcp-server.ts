@@ -69,6 +69,15 @@ not read. audit.tail shows every mutation already applied by this agent.
 Linux hosts: ssh.hosts, ssh.status, ssh.speedtest, ssh.helper are safe reads. ssh.helper.install
 installs the root helper and sudoers drop-in (gated). ssh.power, ssh.service, ssh.backup and
 ssh.exec are gated too.
+Machine control spans Linux hosts and Proxmox nodes: machines.list is a safe read. machines.exec
+runs a command over SSH on either target (a Proxmox node must have a matching Linux host).
+machines.vnc.preflight is a safe read; machines.vnc.setup installs the loopback terminal
+console; machines.vnc.open returns a loopback-only ws://127.0.0.1 URL with a one-time token
+that grants interactive console control, so treat it as a credential. open, setup and exec
+require "confirm": true. machines.vnc.sessions and machines.vnc.close manage only the local
+bridge. Fleet pipelines: console-sweep (read-only VNC readiness across every machine) and
+fleet-command (gated command on every mapped Linux host and Proxmox node). Start either with
+pipeline.run { pipeline, host: "fleet", vars: { command, shell } }.
 DDoS shield: ddos.overview, ddos.status, ddos.rules and ddos.journal are read-only. ddos.mode changes the edge posture; ddos.config pushes rate limits, forwards or the allowlist; ddos.unban and ddos.allow edit containment. ddos.install re-images the edge daemon and ddos.ban adds a source to the drop set; both require "confirm": true. The shield runs on the edge itself, so protection continues with this app closed. The edge host is auto-selected from SSH hosts labelled edge, relay, or shield.
 security.enforce (fixed remediation ids), security.resident and security.policy change a
 host; security.contain bans an address. security.enforce and security.contain require

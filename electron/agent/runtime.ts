@@ -11,6 +11,7 @@ import { registerSshKeyTools } from "./tools-sshkeys";
 import { registerDdosTools } from "./tools-ddos";
 import { registerPraetorTools } from "./tools-praetor";
 import { registerSshTools } from "./tools-ssh";
+import { registerMachineTools } from "./tools-machines";
 import { bindGuardianEmit, guardian } from "../security/guardian";
 import { sshKeys } from "../sshkeys/service";
 import { setHelperAppRoot } from "../ssh/helper";
@@ -33,6 +34,7 @@ export function createRuntime(appRoot: string, emit: (event: NexusEvent) => void
   const registry = new ToolRegistry();
   registerPveTools(registry);
   registerSshTools(registry);
+  registerMachineTools(registry);
   registerSshKeyTools(registry);
   registerSecurityTools(registry);
   registerDdosTools(registry);

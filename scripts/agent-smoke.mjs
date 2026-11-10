@@ -327,6 +327,13 @@ try {
     "sshkey.enforce",
     "sshkey.policy",
     "sshkey.revoke",
+    "machines.list",
+    "machines.exec",
+    "machines.vnc.preflight",
+    "machines.vnc.setup",
+    "machines.vnc.open",
+    "machines.vnc.sessions",
+    "machines.vnc.close",
   ];
   const missing = required.filter((name) => !names.includes(name));
   check("tool registry exposes the full PVE + dev surface", missing.length === 0, missing.length ? `missing: ${missing.join(", ")}` : `${names.length} tools`);
@@ -346,6 +353,8 @@ try {
       destructive.includes("praetor.install") &&
       destructive.includes("praetor.install_all") &&
       destructive.includes("praetor.rotate") &&
+      destructive.includes("machines.exec") &&
+      destructive.includes("machines.vnc.open") &&
       destructive.length >= 3,
     destructive.join(","),
   );
@@ -427,6 +436,26 @@ try {
   check(
     "refused PRAETOR installs leave config and profiles untouched",
     readFileSync(configPath, "utf8") === gateConfigBefore && profilesAfterGate.json?.count === 0,
+  );
+
+  const machineListAfterSeed = await call("machines.list");
+  check(
+    "machines.list includes configured Linux hosts",
+    machineListAfterSeed.isError === false &&
+      (machineListAfterSeed.json?.machines ?? []).some((machine) => machine.kind === "linux" && machine.target === "ssh:praetor-gate-host"),
+    `${machineListAfterSeed.json?.count ?? 0} machines`,
+  );
+  const machineExecGate = await call("machines.exec", { target: "ssh:praetor-gate-host", command: "true" });
+  check(
+    "machines.exec is gated before SSH",
+    machineExecGate.isError === true && /confirm/i.test(machineExecGate.json?.error ?? machineExecGate.text),
+    machineExecGate.json?.error ?? machineExecGate.text.slice(0, 160),
+  );
+  const machineVncGate = await call("machines.vnc.open", { target: "ssh:praetor-gate-host" });
+  check(
+    "machines.vnc.open is gated before opening a tokenized console",
+    machineVncGate.isError === true && /confirm/i.test(machineVncGate.json?.error ?? machineVncGate.text),
+    machineVncGate.json?.error ?? machineVncGate.text.slice(0, 160),
   );
 
   // ---- PRAETOR status: active Proxmox firewall without a 9443 allowance -----
@@ -572,6 +601,27 @@ try {
   check("fleet.overview counts guests", overview.json?.vms?.running === 2 && overview.json?.vms?.total === 3);
   check("fleet.overview surfaces a failed task", (overview.json?.failedTasks ?? []).length >= 1);
 
+  const machines = await call("machines.list");
+  const proxmoxTargets = (machines.json?.machines ?? []).filter((machine) => machine.kind === "proxmox");
+  check(
+    "machines.list exposes every Proxmox node as a control target",
+    machines.isError === false && proxmoxTargets.length === 2 && proxmoxTargets.every((machine) => machine.sshMapped === false),
+    `${proxmoxTargets.length} Proxmox targets`,
+  );
+  const unmappedTarget = proxmoxTargets[0]?.target;
+  const unmappedVnc = await call("machines.vnc.preflight", { target: unmappedTarget });
+  check(
+    "VNC preflight explains a Proxmox node without an SSH mapping",
+    unmappedVnc.isError === false && unmappedVnc.json?.ok === false && /no mapped SSH host/i.test(unmappedVnc.json?.detail ?? ""),
+    unmappedVnc.json?.detail,
+  );
+  const consoleSweep = await call("pipeline.run", { pipeline: "console-sweep", host: "fleet", waitSeconds: 20 });
+  check(
+    "fleet console-sweep runs without a selected Proxmox host",
+    consoleSweep.json?.status === "ok" && (consoleSweep.json?.steps ?? []).length === 2,
+    `${consoleSweep.json?.status}: ${consoleSweep.json?.error ?? ""}`,
+  );
+
   const node = await call("node.detail", { host: hostId, node: "pve-smoke" });
   check("node.detail returns CPU model + kernel + PVE version", /EPYC/.test(node.json?.cpuModel ?? "") && !!node.json?.kernel && !!node.json?.pveVersion);
   check("node.detail reports physical cores and logical threads", node.json?.cores === 16 && node.json?.threads === 32 && node.json?.sockets === 1);
@@ -579,6 +629,23 @@ try {
   check("node.detail reports disks with health", (node.json?.disks ?? []).some((disk) => disk.health === "PASSED"));
   check("node.detail lists storage pools with usage", (node.json?.storage ?? []).length === 2);
   check("node.detail samples RRD history", (node.json?.rrd ?? []).length >= 10);
+  check(
+    "node.detail reports the CPU package temperature from PVE status sensors",
+    node.json?.maxTempC === 47,
+    `${node.json?.maxTempC}°C`,
+  );
+  check(
+    "node.detail exposes the package sensor without max/crit noise",
+    (node.json?.sensors ?? []).some((sensor) => /package/i.test(sensor.name) && sensor.value === 47 && sensor.unit === "°C") &&
+      !(node.json?.sensors ?? []).some((sensor) => /_(max|crit)/i.test(sensor.name)),
+    (node.json?.sensors ?? []).map((sensor) => `${sensor.name}=${sensor.value}${sensor.unit}`).join(", "),
+  );
+  const node2 = await call("node.detail", { host: hostId, node: "pve-smoke2" });
+  check(
+    "node.detail reads the PVE 9 hardware sensors endpoint",
+    node2.json?.maxTempC === 61.5 && (node2.json?.sensors ?? []).some((sensor) => sensor.name === "Tctl" && sensor.value === 61.5),
+    `${node2.json?.maxTempC}°C`,
+  );
 
   const rrd = await call("node.rrd", { host: hostId, node: "pve-smoke", timeframe: "day" });
   check("node.rrd returns a series", (rrd.json?.series ?? []).length >= 10, `${rrd.json?.points} points`);

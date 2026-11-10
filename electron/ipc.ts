@@ -4,6 +4,7 @@ import path from "node:path";
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import { IPC } from "../shared/ipc";
 import type {
+  AppSettings,
   BackupRunRequest,
   HostInput,
   McpStatus,
@@ -104,6 +105,11 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
     configPath: store.file,
     mcpServerPath: mcpServerPath(app.getAppPath(), app.isPackaged),
   }));
+
+  ipcMain.handle(IPC.settingsGet, () => store.settings());
+  ipcMain.handle(IPC.settingsSave, (_event, patch: Partial<AppSettings> | undefined) =>
+    store.setSettings(patch ?? {}),
+  );
 
   ipcMain.handle(IPC.appWindow, (event, action: unknown) => {
     const win = BrowserWindow.fromWebContents(event.sender);

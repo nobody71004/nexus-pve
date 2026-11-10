@@ -1,0 +1,318 @@
+.hardware-panel {
+  margin-top: 11px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(120, 220, 255, 0.1);
+}
+
+.hardware-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+
+.hardware-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.15em;
+  color: var(--cyan);
+}
+
+.hardware-source {
+  overflow: hidden;
+  font-size: 7.5px;
+  color: var(--dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hardware-cpu {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(260px, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.hardware-model {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hardware-model strong {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hardware-model span {
+  overflow: hidden;
+  font-size: 8px;
+  color: var(--dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hardware-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px 11px;
+}
+
+.hardware-fact {
+  min-width: 0;
+  padding-bottom: 3px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.hardware-fact span {
+  display: block;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 6.5px;
+  letter-spacing: 0.1em;
+  color: var(--dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hardware-fact strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 1px;
+  font-size: 10px;
+  font-weight: 450;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hardware-fact em {
+  display: block;
+  overflow: hidden;
+  margin-top: 1px;
+  font-family: var(--mono);
+  font-size: 6.5px;
+  font-style: normal;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hardware-groups {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 9px;
+}
+
+.hardware-group {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.hardware-group-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  margin-bottom: 5px;
+}
+
+.hardware-group-title > span {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 6.5px;
+  letter-spacing: 0.1em;
+  color: var(--dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hardware-group-title em {
+  font-style: normal;
+  color: var(--muted);
+}
+
+.hardware-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hardware-disk {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 5px;
+  min-width: 0;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.hardware-device-name {
+  overflow: hidden;
+  font-size: 7px;
+  color: var(--cyan);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hardware-device-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.hardware-device-main strong {
+  overflow: hidden;
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hardware-device-main span,
+.hardware-device-main em {
+  overflow: hidden;
+  font-size: 7px;
+  font-style: normal;
+  color: var(--dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hardware-nic {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 2px 5px;
+  min-width: 0;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.hardware-nic > strong {
+  overflow: hidden;
+  font-size: 8px;
+  font-weight: 450;
+  color: var(--cyan);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hardware-nic-link {
+  overflow: hidden;
+  font-size: 8px;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hardware-nic-link em {
+  margin-left: 4px;
+  font-family: var(--mono);
+  font-size: 6.5px;
+  font-style: normal;
+  color: var(--dim);
+}
+
+.hardware-nic-mac,
+.hardware-nic-io {
+  grid-column: 2;
+  overflow: hidden;
+  font-size: 6.5px;
+  color: var(--dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hardware-temp {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 5px;
+  min-width: 0;
+}
+
+.hardware-temp span {
+  overflow: hidden;
+  font-size: 7px;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hardware-temp strong {
+  flex: 0 0 auto;
+  font-size: 8px;
+  font-weight: 450;
+  color: var(--text);
+}
+
+.hardware-empty {
+  margin: 0;
+  font-size: 8px;
+  line-height: 1.35;
+  color: var(--dim);
+}
+
+.hardware-panel.compact .hardware-cpu {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 7px;
+}
+
+.hardware-panel.compact .hardware-groups {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.hardware-panel.compact .hardware-group {
+  padding: 6px 7px;
+}
+
+.hardware-panel.compact .hardware-facts {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@container (max-width: 520px) {
+  .hardware-cpu {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hardware-groups {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container (max-width: 340px) {
+  .hardware-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1100px) {
+  .hardware-cpu {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 900px) {
+  .hardware-groups {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

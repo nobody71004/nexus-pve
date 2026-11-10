@@ -136,6 +136,53 @@ const BUILT_INS: PipelineDef[] = [
       { id: "smoke", title: "E2E smoke suite", tool: "dev.smoke" },
     ],
   },
+  {
+    id: "console-sweep",
+    name: "Console readiness sweep",
+    description:
+      "Enumerate every Linux host and Proxmox node, then probe each VNC console through its mapped SSH transport. Read-only; nodes without an SSH mapping are reported explicitly.",
+    category: "health",
+    builtIn: true,
+    steps: [
+      {
+        id: "machines",
+        title: "Enumerate Linux and Proxmox machines",
+        tool: "machines.list",
+        args: { includeLinkedLinux: false },
+      },
+      {
+        id: "preflight",
+        title: "Probe VNC console",
+        tool: "machines.vnc.preflight",
+        forEach: "steps.machines.output.machines",
+        args: { target: "{{item.target}}" },
+      },
+    ],
+  },
+  {
+    id: "fleet-command",
+    name: "Run a command across the fleet",
+    description:
+      "Run one command over SSH on every mapped Linux host and Proxmox node. The operator approves the command step once before anything executes.",
+    category: "maintenance",
+    builtIn: true,
+    steps: [
+      {
+        id: "machines",
+        title: "Enumerate mapped machines",
+        tool: "machines.list",
+        args: { mappedOnly: true, includeLinkedLinux: false },
+      },
+      {
+        id: "command",
+        title: "Run command on each machine",
+        tool: "machines.exec",
+        approval: "always",
+        forEach: "steps.machines.output.machines",
+        args: { target: "{{item.target}}", command: "{{args.command}}", shell: "{{args.shell}}" },
+      },
+    ],
+  },
 ];
 
 export class PipelineService {
@@ -242,14 +289,16 @@ export class PipelineService {
   start(pipelineId: string, hostId: string, vars: Record<string, unknown> = {}): PipelineRun {
     const def = this.defs.get(pipelineId);
     if (!def) throw new Error(`Unknown pipeline: ${pipelineId}`);
-    const host = this.deps.store.host(hostId);
-    if (!host) throw new Error("Choose a configured host first");
+    const fleet = hostId === "fleet";
+    const host = fleet ? undefined : this.deps.store.host(hostId);
+    if (!fleet && !host) throw new Error("Choose a configured host first");
+    const hostLabel = fleet ? "all machines" : host!.label;
 
     const run: PipelineRun = {
       id: crypto.randomUUID(),
       pipelineId,
       name: def.name,
-      hostId,
+      hostId: fleet ? "fleet" : hostId,
       status: "running",
       startedAt: Date.now(),
       steps: def.steps.map<PipelineStepState>((step) => ({
@@ -259,12 +308,16 @@ export class PipelineService {
         status: "pending",
         attempts: 0,
       })),
-      context: { args: { ...vars, host: host.label }, hostId, hostLabel: host.label },
+      context: {
+        args: { ...vars, host: fleet ? "fleet" : host!.label },
+        hostId: fleet ? "fleet" : hostId,
+        hostLabel,
+      },
       log: [],
     };
     this.runs.set(run.id, run);
     this.approvedSteps.set(run.id, new Set());
-    this.log(run, "info", `Run started on ${host.label}`, undefined);
+    this.log(run, "info", `Run started on ${hostLabel}`, undefined);
     this.publish(run);
 
     const controller = new AbortController();
@@ -559,15 +612,19 @@ export class PipelineService {
         type: "object",
         properties: {
           pipeline: { type: "string" },
-          host: { type: "string" },
-          vars: { type: "object", description: "Variables such as storage, note" },
+          host: {
+            type: "string",
+            description: "Configured Proxmox host, or \"fleet\" for a fleet-wide pipeline that enumerates every Linux host and Proxmox node.",
+          },
+          vars: { type: "object", description: "Variables such as storage, note or command" },
           waitSeconds: { type: "number", description: "Block up to 60s for completion" },
         },
         required: ["pipeline"],
       },
       run: async (args, ctx) => {
         const pipelineId = String(args.pipeline ?? "");
-        const hostId = resolveHostId(args, ctx);
+        const fleet = args.host === "fleet";
+        const hostId = fleet ? "fleet" : resolveHostId(args, ctx);
         const vars = (args.vars && typeof args.vars === "object" ? args.vars : {}) as Record<string, unknown>;
         const run = this.start(pipelineId, hostId, vars);
         const waitSeconds = Math.min(60, Math.max(0, Number(args.waitSeconds ?? 0)));

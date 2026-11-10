@@ -27,6 +27,10 @@ const bridge: NexusBridge = {
     window: (action) => ipcRenderer.invoke(IPC.appWindow, action),
     openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
   },
+  settings: {
+    get: () => ipcRenderer.invoke(IPC.settingsGet),
+    save: (patch) => ipcRenderer.invoke(IPC.settingsSave, patch),
+  },
   auth: {
     status: () => ipcRenderer.invoke(IPC.authStatus),
     bootstrap: (input: TeamBootstrapInput) => ipcRenderer.invoke(IPC.authBootstrap, input),

@@ -215,6 +215,64 @@ export interface GpuInfo {
   iommuGroup?: number;
 }
 
+export interface GpuProcess {
+  pid?: number;
+  name: string;
+  /** Resident graphics-memory use, when the driver reports it. */
+  memoryUsed?: number;
+}
+
+/** Rolling samples for GPU trends, oldest first. */
+export interface GpuHistory {
+  utilization: number[];
+  temperatureC: number[];
+}
+
+export interface GpuAlertThresholds {
+  /** Edge temperature at which the GPU is flagged, in °C. */
+  temperatureC: number;
+  /** Consecutive samples at or above temperatureC before a thermal alert fires. */
+  temperatureSamples: number;
+  /** Power draw as a percentage of the board limit. */
+  powerPct: number;
+  /** VRAM use as a percentage of total. */
+  vramPct: number;
+}
+
+/**
+ * Live per-GPU telemetry collected over SSH. Optional fields mean the driver
+ * did not expose the value; they are never filled with a guessed number.
+ */
+export interface GpuTelemetry {
+  id: string;
+  index: number;
+  name: string;
+  vendor: "nvidia" | "amd" | "intel" | "unknown";
+  pci?: string;
+  utilization?: number;
+  memoryUtilization?: number;
+  temperatureC?: number;
+  hotspotC?: number;
+  memoryTemperatureC?: number;
+  memoryUsed?: number;
+  memoryTotal?: number;
+  powerW?: number;
+  powerLimitW?: number;
+  fanPercent?: number;
+  fanRpm?: number;
+  clockMhz?: number;
+  memoryClockMhz?: number;
+  pstate?: string;
+  driver?: string;
+  pcieGeneration?: number;
+  pcieWidth?: number;
+  processes?: GpuProcess[];
+  /** Capped rolling history collected by the SSH probe, oldest first. */
+  history?: GpuHistory;
+  source: "nvidia-smi" | "amdgpu-sysfs" | "inventory";
+  error?: string;
+}
+
 export interface NodeStats {
   node: string;
   status: string;
@@ -240,6 +298,11 @@ export interface NodeStats {
   gpus: GpuInfo[];
   /** Set only when the PCI inventory could not be read (usually Sys.Audit). */
   gpuError?: string;
+  /** Live metrics sampled over SSH from a matching Linux host or Proxmox node. */
+  gpuTelemetry: GpuTelemetry[];
+  gpuTelemetryError?: string;
+  /** Configured SSH host that supplied gpuTelemetry. */
+  gpuTelemetryHost?: string;
   network: NicInfo[];
   sensors: SensorReading[];
   rrd: RrdPoint[];
@@ -630,6 +693,11 @@ export interface SshNic {
   name: string;
   rx: number;
   tx: number;
+  /** Negotiated link speed in Mbps; absent when sysfs reports none. */
+  speedMbps?: number;
+  state?: string;
+  mac?: string;
+  mtu?: number;
 }
 
 export interface SshBlockDevice {
@@ -637,6 +705,9 @@ export interface SshBlockDevice {
   model: string;
   size: number;
   rotational: boolean;
+  /** Kernel device type from lsblk, e.g. disk. */
+  type?: string;
+  serial?: string;
 }
 
 export interface SshService {
@@ -735,7 +806,12 @@ export interface SshSnapshot {
   identity: { hostname: string; os: string; kernel: string; arch: string; uptime: number };
   cpu: {
     model: string;
+    /** Logical processors (hardware threads). */
     cores: number;
+    /** Physical cores reported by the CPU topology, when available. */
+    physicalCores?: number;
+    /** Physical CPU sockets reported by the CPU topology, when available. */
+    sockets?: number;
     load: number[];
     usage: number;
     mhz?: number;
@@ -747,6 +823,9 @@ export interface SshSnapshot {
   blockDevices: SshBlockDevice[];
   nics: SshNic[];
   temps: Array<{ label: string; celsius: number }>;
+  /** Live NVIDIA/AMD/Intel GPU metrics; empty when no supported GPU was found. */
+  gpus: GpuTelemetry[];
+  gpuError?: string;
   services: SshService[];
   containers: SshContainer[];
   processes: SshProcess[];
@@ -865,11 +944,23 @@ export interface NexusEvent {
   teamSync?: TeamSyncStatus;
 }
 
+export interface AppSettings {
+  pollMs: number;
+  accent: "cyan" | "violet" | "amber";
+  reduceMotion: boolean;
+  confirmDestructive: boolean;
+  gpuAlerts: GpuAlertThresholds;
+}
+
 export interface NexusBridge {
   app: {
     info(): Promise<AppInfo>;
     window(action: "minimize" | "maximize" | "close"): Promise<void>;
     openExternal(url: string): Promise<void>;
+  };
+  settings: {
+    get(): Promise<AppSettings>;
+    save(patch: Partial<AppSettings>): Promise<AppSettings>;
   };
   auth: {
     status(): Promise<TeamAuthState>;

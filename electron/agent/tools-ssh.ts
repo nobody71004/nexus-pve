@@ -46,7 +46,7 @@ export function registerSshTools(registry: ToolRegistry): void {
     name: "ssh.status",
     title: "Linux host telemetry",
     description:
-      "Read live hardware and service telemetry from a Linux host over SSH: CPU, memory, disks, NIC counters, temperatures, failed units, containers, top processes and SSH auth history. Read-only.",
+      "Read live hardware and service telemetry from a Linux host over SSH: CPU model/topology, memory, physical block devices, filesystems, NIC link details and counters, temperatures, GPU utilization/temperature/VRAM/power/fan/clocks/processes, failed units, containers, top processes and SSH auth history. Read-only.",
     category: "read",
     inputSchema: {
       type: "object",
@@ -70,6 +70,9 @@ export function registerSshTools(registry: ToolRegistry): void {
         cpu: {
           model: snapshot.cpu.model,
           cores: snapshot.cpu.cores,
+          physicalCores: snapshot.cpu.physicalCores ?? null,
+          sockets: snapshot.cpu.sockets ?? null,
+          threads: snapshot.cpu.cores,
           usagePct: Math.round(snapshot.cpu.usage * 10) / 10,
           load: snapshot.cpu.load,
           mhz: snapshot.cpu.mhz,
@@ -85,8 +88,11 @@ export function registerSshTools(registry: ToolRegistry): void {
           sizeGB: Math.round((disk.size / 1024 ** 3) * 10) / 10,
           usedPct: disk.size > 0 ? Math.round((disk.used / disk.size) * 1000) / 10 : 0,
         })),
+        blockDevices: snapshot.blockDevices,
         nics: snapshot.nics,
         temps: snapshot.temps,
+        gpus: snapshot.gpus,
+        gpuError: snapshot.gpuError ?? null,
         failedUnits: snapshot.services.filter((service) => service.state === "failed").map((service) => service.name),
         containers: snapshot.containers,
         topProcesses: snapshot.processes.slice(0, 5),

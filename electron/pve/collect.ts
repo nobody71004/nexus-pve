@@ -1,5 +1,6 @@
 import type { FleetSnapshot, HostRuntimeStatus, HostTestResult, RrdPoint, TaskSummary, VmDetail } from "../../shared/types";
 import type { ConfigStore, StoredHost } from "../config";
+import { collectPveNodeGpuTelemetry, collectPveNodeSshTemps } from "../ssh/collect";
 import { PveClient, PveError, errorMessage } from "./client";
 import {
   deleteArchive,
@@ -90,7 +91,7 @@ export async function collectSnapshot(store: ConfigStore, hostId: string, force 
 }
 
 async function buildSnapshot(store: ConfigStore, hostId: string): Promise<FleetSnapshot> {
-  const { client } = requireHost(store, hostId);
+  const { host, client } = requireHost(store, hostId);
   const started = Date.now();
   const errors: string[] = [];
 
@@ -128,7 +129,12 @@ async function buildSnapshot(store: ConfigStore, hostId: string): Promise<FleetS
   const nodes = await Promise.all(
     nodeList.map(async (summary) => {
       try {
-        return await fetchNodeStats(client, summary.node, summary);
+        const stats = await fetchNodeStats(client, summary.node, summary);
+        await Promise.all([
+          collectPveNodeGpuTelemetry(store, host, stats),
+          collectPveNodeSshTemps(store, host, stats),
+        ]);
+        return stats;
       } catch (err) {
         errors.push(`${summary.node}: ${errorMessage(err)}`);
         return null;

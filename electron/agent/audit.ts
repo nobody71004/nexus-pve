@@ -32,7 +32,7 @@ export function summarizeArgs(args: Record<string, unknown>): Record<string, unk
       out.contentBytes = Buffer.byteLength(value);
       continue;
     }
-    if (key === "password" || key === "secret" || key === "token") {
+    if (key === "password" || key === "sudoPassword" || key === "secret" || key === "token") {
       out[key] = "[redacted]";
       continue;
     }

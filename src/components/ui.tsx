@@ -227,13 +227,15 @@ export function Chip({
   children,
   tone = "muted",
   dot,
+  title,
 }: {
   children: ReactNode;
   tone?: "muted" | "ok" | "warn" | "err" | "info" | "violet";
   dot?: boolean;
+  title?: string;
 }) {
   return (
-    <span className={cx("chip", `chip-${tone}`)}>
+    <span className={cx("chip", `chip-${tone}`)} title={title}>
       {dot ? <i className="dot" /> : null}
       {children}
     </span>

@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { BackupArchive, FleetSnapshot, NodeStats, VmDetail, VmSummary } from "../../shared/types";
+import { cpuPackageTemp } from "../../shared/sensors";
 import { incidentsDir } from "../paths";
 import {
   actOnVm,
@@ -37,8 +38,7 @@ function nodeCompact(node: NodeStats) {
     const health = disk.health.toUpperCase();
     return health && health !== "PASSED" && health !== "UNKNOWN" && health !== "OK";
   });
-  const temps = node.sensors.filter((sensor) => /temp/i.test(sensor.unit) || /coretemp|cpu/i.test(sensor.name));
-  const maxTemp = temps.length > 0 ? Math.max(...temps.map((sensor) => sensor.value)) : null;
+  const maxTemp = cpuPackageTemp(node.sensors);
   return {
     node: node.node,
     status: node.status,
@@ -67,6 +67,9 @@ function nodeCompact(node: NodeStats) {
     disksWithHealthWarnings: critical.map((disk) => ({ dev: disk.dev, health: disk.health, wearout: disk.wearout ?? null })),
     gpus: node.gpus,
     gpuError: node.gpuError ?? null,
+    gpuTelemetry: node.gpuTelemetry,
+    gpuTelemetryError: node.gpuTelemetryError ?? null,
+    gpuTelemetryHost: node.gpuTelemetryHost ?? null,
   };
 }
 
@@ -181,7 +184,7 @@ export function registerPveTools(registry: ToolRegistry): void {
     name: "node.detail",
     title: "Node hardware detail",
     description:
-      "Full hardware report for one node: CPU model/cores/threads/sockets, memory, swap, rootfs, load, physical disks (model, serial, health, wearout), storage pools, PCI GPUs, NICs, sensors and a 1-hour RRD sample. GPU errors are reported rather than hidden.",
+      "Full hardware report for one node: CPU model/cores/threads/sockets, memory, swap, rootfs, load, physical disks (model, serial, health, wearout), storage pools, PCI GPUs, live GPU utilization/temperature/memory/power/processes when a matching SSH host is configured, NICs, sensors and a 1-hour RRD sample. GPU errors are reported rather than hidden.",
     category: "read",
     inputSchema: {
       type: "object",

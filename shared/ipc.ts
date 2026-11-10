@@ -2,6 +2,8 @@ export const IPC = {
   appInfo: "nexus:app-info",
   appWindow: "nexus:app-window",
   openExternal: "nexus:open-external",
+  settingsGet: "nexus:settings-get",
+  settingsSave: "nexus:settings-save",
   authStatus: "nexus:auth-status",
   authBootstrap: "nexus:auth-bootstrap",
   authLogin: "nexus:auth-login",

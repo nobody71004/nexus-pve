@@ -1,6 +1,10 @@
 import { useEffect, useId, useState, type CSSProperties } from "react";
 import type { HostSummary, NodeStats } from "../../shared/types";
+import { cpuPackageTemp } from "../../shared/sensors";
+import { findSustainedTemperatureAlert } from "../../shared/gpu-alerts";
 import { bytes, cx, duration, pct } from "../lib/format";
+import { useGpuAlerts } from "../lib/gpuAlerts";
+import { GpuTelemetryPanel } from "./GpuDial";
 import { Icon } from "./Icon";
 import { Chip, MiniBar, Sparkline, type Tone } from "./ui";
 
@@ -264,7 +268,7 @@ export function NodeDial({
 export function NodeCard({ node, endpoint }: { node: NodeStats; endpoint?: HostSummary }) {
   const cpu = node.cpu * 100;
   const mem = pct(node.memory.used, node.memory.total);
-  const maxTemp = node.sensors.length > 0 ? Math.max(...node.sensors.map((sensor) => sensor.value)) : null;
+  const packageTemp = cpuPackageTemp(node.sensors);
   const net = node.rrd.map((point) => point.netin + point.netout);
   const unhealthy = node.disks.filter((disk) => {
     const health = disk.health.toUpperCase();
@@ -275,6 +279,8 @@ export function NodeCard({ node, endpoint }: { node: NodeStats; endpoint?: HostS
   const loadPct = node.threads > 0 ? (node.loadavg[0] / node.threads) * 100 : 0;
   const swapPct = node.swap.total > 0 ? pct(node.swap.used, node.swap.total) : 0;
   const offline = node.status !== "online";
+  const thresholds = useGpuAlerts();
+  const thermalAlert = findSustainedTemperatureAlert(node.gpuTelemetry ?? [], thresholds);
 
   return (
     <article
@@ -295,6 +301,15 @@ export function NodeCard({ node, endpoint }: { node: NodeStats; endpoint?: HostS
           </div>
         </div>
         <div className="node-badges">
+          {thermalAlert ? (
+            <Chip
+              tone="err"
+              dot
+              title={`${thermalAlert.gpu.name}: ${thermalAlert.state.temperatureStreak} samples at or above ${thresholds.temperatureC}°C`}
+            >
+              GPU THERMAL
+            </Chip>
+          ) : null}
           <Chip tone={node.status === "online" ? "ok" : "err"} dot>
             {node.status}
           </Chip>
@@ -357,7 +372,9 @@ export function NodeCard({ node, endpoint }: { node: NodeStats; endpoint?: HostS
           </div>
           <div>
             <span>Package temp</span>
-            <strong className={maxTemp && maxTemp > 75 ? "warn-text" : ""}>{maxTemp ? `${Math.round(maxTemp)}°C` : "—"}</strong>
+            <strong className={packageTemp !== null && packageTemp > 75 ? "warn-text" : ""}>
+              {packageTemp !== null ? `${Math.round(packageTemp)}°C` : "—"}
+            </strong>
           </div>
           <div className="node-net">
             <span>Network in/out</span>
@@ -385,25 +402,12 @@ export function NodeCard({ node, endpoint }: { node: NodeStats; endpoint?: HostS
         {node.storages.length === 0 ? <span className="subtle">No storage reported (permission or inactive pools)</span> : null}
       </div>
 
-      <div className="node-gpu">
-        <span className="node-gpu-label">
-          <Icon name="cpu" size={12} /> GPU
-        </span>
-        {node.gpus.length > 0 ? (
-          <div className="node-gpu-list">
-            {node.gpus.map((gpu) => (
-              <span key={`${gpu.pci}-${gpu.device}`} title={`${gpu.className}${gpu.iommuGroup !== undefined ? ` · IOMMU ${gpu.iommuGroup}` : ""}`}>
-                <strong>{gpu.name}</strong>
-                <em className="mono">{gpu.pci}</em>
-              </span>
-            ))}
-          </div>
-        ) : (
-          <span className="subtle" title={node.gpuError ?? undefined}>
-            {node.gpuError ? "Unavailable (needs Sys.Audit)" : "None detected"}
-          </span>
-        )}
-      </div>
+      <GpuTelemetryPanel
+        gpus={node.gpuTelemetry ?? []}
+        error={node.gpuTelemetryError ?? node.gpuError}
+        inventory={node.gpus}
+        source={node.gpuTelemetryHost}
+      />
 
       <div className="node-foot">
         <span>

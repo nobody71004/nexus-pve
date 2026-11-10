@@ -6,6 +6,8 @@ import "./team-styles.css";
 import "./ddos-styles.css";
 import "./praetor.css";
 import "./sshkeys-styles.css";
+import "./gpu-styles.css";
+import "./hardware-styles.css";
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

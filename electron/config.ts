@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { configPath, nexusHome } from "./paths";
 import { decryptSecret, encryptSecret } from "./vault";
-import type { HostInput, HostSummary, SshHostInput, SshHostSummary } from "../shared/types";
+import { DEFAULT_GPU_ALERTS } from "../shared/gpu-alerts";
+import type { AppSettings, HostInput, HostSummary, SshHostInput, SshHostSummary } from "../shared/types";
 
 export interface StoredHost extends HostSummary {
   secretEnc?: string;
@@ -19,13 +20,6 @@ function publicSshHost(host: StoredSshHost): SshHostSummary {
   return rest;
 }
 
-export interface AppSettings {
-  pollMs: number;
-  accent: "cyan" | "violet" | "amber";
-  reduceMotion: boolean;
-  confirmDestructive: boolean;
-}
-
 export interface StoredConfig {
   version: 1;
   activeHostId?: string;
@@ -39,10 +33,39 @@ const DEFAULTS: AppSettings = {
   accent: "cyan",
   reduceMotion: false,
   confirmDestructive: true,
+  gpuAlerts: { ...DEFAULT_GPU_ALERTS },
 };
 
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
+}
+
+/** Fills in new settings for configs written by older versions and clamps inputs. */
+export function normalizeSettings(input: Partial<AppSettings> | undefined): AppSettings {
+  const raw = input ?? {};
+  const alerts = { ...DEFAULT_GPU_ALERTS, ...(raw.gpuAlerts ?? {}) };
+  return {
+    pollMs: clampNumber(raw.pollMs, 2_000, 120_000, DEFAULTS.pollMs),
+    accent: raw.accent === "violet" || raw.accent === "amber" ? raw.accent : "cyan",
+    reduceMotion: raw.reduceMotion === true,
+    confirmDestructive: raw.confirmDestructive !== false,
+    gpuAlerts: {
+      temperatureC: clampNumber(alerts.temperatureC, 30, 110, DEFAULT_GPU_ALERTS.temperatureC),
+      temperatureSamples: clampNumber(
+        alerts.temperatureSamples,
+        2,
+        20,
+        DEFAULT_GPU_ALERTS.temperatureSamples,
+      ),
+      powerPct: clampNumber(alerts.powerPct, 10, 100, DEFAULT_GPU_ALERTS.powerPct),
+      vramPct: clampNumber(alerts.vramPct, 10, 100, DEFAULT_GPU_ALERTS.vramPct),
+    },
+  };
+}
+
 function blank(): StoredConfig {
-  return { version: 1, hosts: [], sshHosts: [], settings: { ...DEFAULTS } };
+  return { version: 1, hosts: [], sshHosts: [], settings: normalizeSettings(DEFAULTS) };
 }
 
 export function normalizeBaseUrl(raw: string): string {
@@ -134,7 +157,7 @@ export class ConfigStore {
         activeHostId: raw.activeHostId,
         hosts: Array.isArray(raw.hosts) ? raw.hosts : [],
         sshHosts: Array.isArray(raw.sshHosts) ? raw.sshHosts : [],
-        settings: { ...DEFAULTS, ...(raw.settings ?? {}) },
+        settings: normalizeSettings(raw.settings),
       };
       return config;
     } catch (err) {
@@ -348,7 +371,8 @@ export class ConfigStore {
 
   setSettings(patch: Partial<AppSettings>): AppSettings {
     const config = this.read();
-    config.settings = { ...config.settings, ...patch };
+    const gpuAlerts = { ...config.settings.gpuAlerts, ...(patch.gpuAlerts ?? {}) };
+    config.settings = normalizeSettings({ ...config.settings, ...patch, gpuAlerts });
     this.write(config);
     return config.settings;
   }

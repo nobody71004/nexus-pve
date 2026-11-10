@@ -1,8 +1,12 @@
 import type { CSSProperties } from "react";
 import type { SshHostSummary, SshRuntimeStatus, SshSnapshot } from "../../shared/types";
 import { bytes, duration, pct } from "../lib/format";
+import { findSustainedTemperatureAlert } from "../../shared/gpu-alerts";
+import { useGpuAlerts } from "../lib/gpuAlerts";
 import { Icon } from "./Icon";
 import { Chip, MiniBar, Sparkline, type Tone } from "./ui";
+import { GpuTelemetryPanel } from "./GpuDial";
+import { ServerHardware } from "./ServerHardware";
 import { NodeDial } from "./NodeCard";
 
 function dialTone(value: number, offline: boolean): Tone {
@@ -53,6 +57,8 @@ export function SshServerCard({
   const memoryPeak = Math.max(memory, ...samples.map((sample) => sample.mem));
   const net = samples.map((sample) => sample.netRx + sample.netTx);
   const latency = Math.round(status?.latencyMs ?? snapshot?.status.latencyMs ?? 0);
+  const thresholds = useGpuAlerts();
+  const thermalAlert = findSustainedTemperatureAlert(snapshot?.gpus ?? [], thresholds);
 
   return (
     <article
@@ -73,6 +79,15 @@ export function SshServerCard({
           </div>
         </div>
         <div className="node-badges">
+          {thermalAlert ? (
+            <Chip
+              tone="err"
+              dot
+              title={`${thermalAlert.gpu.name}: ${thermalAlert.state.temperatureStreak} samples at or above ${thresholds.temperatureC}°C`}
+            >
+              GPU THERMAL
+            </Chip>
+          ) : null}
           <Chip tone={health === "online" ? "ok" : health === "degraded" ? "warn" : offline ? "err" : "muted"} dot>
             {health}
           </Chip>
@@ -165,6 +180,13 @@ export function SshServerCard({
           <span className="subtle">{waiting ? "Waiting for the first SSH probe…" : "No filesystems reported"}</span>
         ) : null}
       </div>
+
+      {snapshot ? <ServerHardware snapshot={snapshot} compact /> : null}
+
+      <GpuTelemetryPanel
+        gpus={snapshot?.gpus ?? []}
+        error={snapshot?.gpuError}
+      />
 
       <div className="node-foot">
         <span>

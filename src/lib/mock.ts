@@ -1,4 +1,6 @@
+import { DEFAULT_GPU_ALERTS } from "../../shared/gpu-alerts";
 import type {
+  AppSettings,
   BackupArchive,
   ClusterBackupJob,
   DdosConfig,
@@ -8,6 +10,7 @@ import type {
   DdosOverview,
   DdosStatus,
   FleetSnapshot,
+  GpuTelemetry,
   HostInput,
   HostSummary,
   HostTestResult,
@@ -161,6 +164,77 @@ function makeRrd(seed: number, base: number): RrdPoint[] {
   });
 }
 
+function mockGpuHistory(utilization: number, temperatureC: number, phase: number) {
+  const util = Array.from({ length: 60 }, (_, index) => {
+    const wave = Math.sin(index / 6 + phase) * 14 + Math.cos(index / 2.7 + phase) * 5;
+    return Math.round(Math.min(100, Math.max(2, utilization + wave)) * 10) / 10;
+  });
+  const temp = Array.from({ length: 60 }, (_, index) => {
+    const wave = Math.sin(index / 7 + phase) * 3.2 + Math.cos(index / 3.4 + phase) * 1.1;
+    return Math.round((temperatureC + wave) * 10) / 10;
+  });
+  util[util.length - 1] = utilization;
+  temp[temp.length - 1] = temperatureC;
+  return { utilization: util, temperatureC: temp };
+}
+
+function mockGpuTelemetry(kind: "nvidia" | "amd"): GpuTelemetry {
+  if (kind === "amd") {
+    return {
+      id: "0000:43:00.0",
+      index: 0,
+      name: "AMD Radeon PRO W7900",
+      vendor: "amd",
+      pci: "0000:43:00.0",
+      utilization: 41.2,
+      memoryUtilization: 36.8,
+      temperatureC: 58.4,
+      hotspotC: 71.2,
+      memoryTemperatureC: 62.1,
+      memoryUsed: 11.8 * 1024 ** 3,
+      memoryTotal: 48 * 1024 ** 3,
+      powerW: 188.3,
+      powerLimitW: 295,
+      fanPercent: 39,
+      fanRpm: 1420,
+      clockMhz: 2140,
+      memoryClockMhz: 1120,
+      driver: "amdgpu",
+      history: mockGpuHistory(41.2, 58.4, 1.7),
+      source: "amdgpu-sysfs",
+    };
+  }
+  return {
+    id: "GPU-6f0c7b8e-2d7f-4a31-a9f2-demo-a4000",
+    index: 0,
+    name: "NVIDIA RTX A4000",
+    vendor: "nvidia",
+    pci: "0000:41:00.0",
+    utilization: 63.4,
+    memoryUtilization: 49.2,
+    temperatureC: 67.2,
+    hotspotC: 78.1,
+    memoryUsed: 7.9 * 1024 ** 3,
+    memoryTotal: 16 * 1024 ** 3,
+    powerW: 93.4,
+    powerLimitW: 140,
+    fanPercent: 52,
+    fanRpm: 1680,
+    clockMhz: 1680,
+    memoryClockMhz: 7001,
+    pstate: "P2",
+    driver: "550.54.15",
+    pcieGeneration: 4,
+    pcieWidth: 16,
+    processes: [
+      { pid: 2411, name: "python3", memoryUsed: 5.4 * 1024 ** 3 },
+      { pid: 1984, name: "ffmpeg", memoryUsed: 1.2 * 1024 ** 3 },
+    ],
+    history: mockGpuHistory(63.4, 67.2, 0.4),
+    source: "nvidia-smi",
+  };
+}
+
 function makeNode(hostId: string, name: string, index: number, diskUsed: number): NodeStats {
   const fabric = NODE_FABRIC[hostId];
   const baseCpu = fabric.cpu[index] ?? 0.3;
@@ -210,6 +284,8 @@ function makeNode(hostId: string, name: string, index: number, diskUsed: number)
     gpus: hostId === "host-lab"
       ? [{ name: "NVIDIA RTX A4000", vendor: "NVIDIA Corporation", device: "GA104GL [RTX A4000]", pci: "0000:41:00.0", className: "VGA compatible controller", iommuGroup: 22 }]
       : [],
+    gpuTelemetry: hostId === "host-lab" && index === 0 ? [mockGpuTelemetry("nvidia")] : [],
+    ...(hostId === "host-lab" && index === 0 ? { gpuTelemetryHost: "pve-hyperion" } : {}),
     disks: [
       {
         dev: "/dev/nvme0n1",
@@ -466,6 +542,28 @@ const PIPELINES: PipelineDef[] = [
       { id: "typecheck", title: "Typecheck", tool: "dev.typecheck" },
       { id: "build", title: "Production build", tool: "dev.build" },
       { id: "smoke", title: "E2E smoke suite", tool: "dev.smoke" },
+    ],
+  },
+  {
+    id: "console-sweep",
+    name: "Console readiness sweep",
+    description: "Enumerate every Linux host and Proxmox node, then probe each VNC console through its mapped SSH transport. Read-only.",
+    category: "health",
+    builtIn: true,
+    steps: [
+      { id: "machines", title: "Enumerate Linux and Proxmox machines", tool: "machines.list" },
+      { id: "preflight", title: "Probe VNC console", tool: "machines.vnc.preflight" },
+    ],
+  },
+  {
+    id: "fleet-command",
+    name: "Run a command across the fleet",
+    description: "Run one command over SSH on every mapped Linux host and Proxmox node. The operator approves the command step before anything executes.",
+    category: "maintenance",
+    builtIn: true,
+    steps: [
+      { id: "machines", title: "Enumerate mapped machines", tool: "machines.list" },
+      { id: "command", title: "Run command on each machine", tool: "machines.exec", approval: "always" },
     ],
   },
 ];
@@ -885,6 +983,8 @@ function makeSshSnapshot(host: SshHostSummary): SshSnapshot {
     cpu: {
       model: host.id === "ssh-edge" ? "AMD EPYC-Genoa Processor" : "Intel Xeon E5-2699 v3",
       cores: host.id === "ssh-edge" ? 2 : 32,
+      physicalCores: host.id === "ssh-edge" ? 2 : 16,
+      sockets: host.id === "ssh-edge" ? 1 : 2,
       load: [0.62, 0.48, 0.4],
       usage: cpu,
       mhz: 2900,
@@ -900,12 +1000,15 @@ function makeSshSnapshot(host: SshHostSummary): SshSnapshot {
       { fs: "/dev/vda1", mount: "/", size: 78 * 1024 ** 3, used: 41 * 1024 ** 3, avail: 33 * 1024 ** 3 },
       { fs: "/dev/vda15", mount: "/boot/efi", size: 106 * 1024 ** 2, used: 6 * 1024 ** 2, avail: 100 * 1024 ** 2 },
     ],
-    blockDevices: [{ name: "vda", model: "QEMU HARDDISK", size: 80 * 1024 ** 3, rotational: false }],
+    blockDevices: [
+      { name: "vda", model: "QEMU HARDDISK", size: 80 * 1024 ** 3, rotational: false, type: "disk", serial: "QM00001" },
+    ],
     nics: [
-      { name: "ens18", rx: 8_412_882_112, tx: 2_112_882_112 },
-      { name: "wg0", rx: 1_212_882_112, tx: 812_882_112 },
+      { name: "ens18", rx: 8_412_882_112, tx: 2_112_882_112, speedMbps: 10_000, state: "up", mac: "52:54:00:8e:21:4c", mtu: 1500 },
+      { name: "wg0", rx: 1_212_882_112, tx: 812_882_112, speedMbps: undefined, state: "up", mac: "00:00:00:00:00:00", mtu: 1420 },
     ],
     temps: [{ label: "x86_pkg_temp", celsius: 41.5 }],
+    gpus: host.id === "ssh-edge" ? [mockGpuTelemetry("nvidia")] : host.id === "ssh-dedicated" ? [mockGpuTelemetry("amd")] : [],
     services: [
       { name: "ssh.service", state: "running" },
       { name: "nginx.service", state: "running" },
@@ -1319,6 +1422,13 @@ function mockRelayOverview(): RelayOverview {
 }
 
 export function createMockBridge(): NexusBridge {
+  let mockSettings: AppSettings = {
+    pollMs: 8000,
+    accent: "cyan",
+    reduceMotion: false,
+    confirmDestructive: true,
+    gpuAlerts: { ...DEFAULT_GPU_ALERTS },
+  };
   const mockSyncStatus = (): TeamSyncStatus => ({
     enabled: false,
     phase: "disabled",
@@ -1356,6 +1466,17 @@ export function createMockBridge(): NexusBridge {
       }),
       window: async () => undefined,
       openExternal: async () => undefined,
+    },
+    settings: {
+      get: async () => mockSettings,
+      save: async (patch) => {
+        mockSettings = {
+          ...mockSettings,
+          ...patch,
+          gpuAlerts: { ...mockSettings.gpuAlerts, ...(patch.gpuAlerts ?? {}) },
+        };
+        return mockSettings;
+      },
     },
     auth: {
       status: async (): Promise<TeamAuthState> => ({ initialized: true, user: mockAdmin, expiresAt: Date.now() + 12 * 60 * 60 * 1000 }),

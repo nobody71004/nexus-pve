@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="License: GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-2ea44f?style=flat-square" /></a>
   <img alt="Platform: Windows 10/11 x64" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0a84ff?style=flat-square" />
   <img alt="Edge runtime: Python 3.10+ and nftables" src="https://img.shields.io/badge/edge-Python%203.10%2B%20%2B%20nftables-7c5cff?style=flat-square" />
-  <img alt="Version 1.0.8" src="https://img.shields.io/badge/version-1.0.8-3ddc97?style=flat-square" />
+  <img alt="Version 1.0.9" src="https://img.shields.io/badge/version-1.0.9-3ddc97?style=flat-square" />
 </p>
 
 > **Documentation image:** the hero uses documentation addresses from the RFC 5737 ranges. It does not show a live edge address. The project ships with fictional demo data and no credentials, private keys, or real infrastructure addresses.
@@ -73,7 +73,7 @@ The result is a console for a small but real fleet: a Proxmox cluster, a few Lin
 
 | Area | Implementation |
 | --- | --- |
-| Product | Nexus PVE `1.0.8` |
+| Product | Nexus PVE `1.0.9` |
 | Desktop shell | Electron 33, React 18, TypeScript, Vite |
 | Desktop target | Windows 10/11 x64 portable executable |
 | Proxmox access | HTTPS API with token or password authentication, optional TLS verification |
@@ -90,9 +90,27 @@ The result is a console for a small but real fleet: a Proxmox cluster, a few Lin
 
 ### Portable build
 
-Prebuilt portable artifacts are published on the repository's [Releases](../../releases) page. The current build is [`v1.0.8`](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.8).
+Prebuilt portable artifacts are published on the repository's [Releases](../../releases) page. The current build is [`v1.0.9`](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.9).
 
-The portable target is Windows 10/11 x64. It requires no installer and no system Node.js runtime. Verify the download against the SHA-256 in the release notes; a local checkout that includes `NexusPVE-1.0.8-portable.exe` should match the same hash.
+The portable target is Windows 10/11 x64. It requires no installer and no system Node.js runtime. Verify the download against the SHA-256 in the release notes; a local checkout that includes `NexusPVE-1.0.9-portable.exe` should match the same hash.
+
+### Release 1.0.9
+
+`v1.0.9` adds live GPU and server-hardware telemetry, sustained thermal alerts, and a unified machine-control surface for agents.
+
+- **GPU telemetry** — Node and Linux host cards read NVIDIA `nvidia-smi` and AMD `amdgpu` sysfs data: utilization, VRAM, temperature, hotspot, memory temperature where exposed, power, fans, clocks, PCIe state, and compute processes. Unsupported devices and driver failures are reported explicitly instead of being shown as zero.
+- **Server hardware** — Linux host cards expose CPU model and topology, memory, physical disks, NIC link state and counters, and thermal sensors. Proxmox node details read the PVE 8/9 sensor endpoints and use the CPU package sensor rather than the highest chassis reading.
+- **Sustained thermal alerts** — GPU temperature limits are configurable with a consecutive-sample window (default 3, clamped to 2–20). A card is flagged `GPU THERMAL` only after the temperature stays at or above the threshold for the full window; one cool sample resets the streak.
+- **Unified machine tools** — New `machines.list`, `machines.exec`, `machines.vnc.preflight`, `machines.vnc.setup`, `machines.vnc.open`, `machines.vnc.sessions`, and `machines.vnc.close` tools cover Linux SSH hosts and Proxmox nodes through one surface. Proxmox nodes without an SSH mapping are listed with a repair hint.
+- **Fleet pipelines** — `console-sweep` and `fleet-command` run across the SSH inventory. `pipeline.run` accepts `host: "fleet"`, with an optional shell-free command.
+- **Safety** — Command and VNC setup/open actions require `confirm: true`; VNC remains loopback-only behind authenticated SSH; session listings omit tokens; `sudoPassword` is redacted from audit summaries.
+- **Verification** — Preflight passes 4/4 edge tests, 81/81 agent/MCP checks, 23/23 GPU checks, 15/15 hardware checks, 26/26 SSH-key checks, and 10/10 Agent Fabric checks. The packaged app smoke test passes 12/12 with 84 MCP tools.
+
+| Asset | Size | SHA-256 |
+|---|---|---|
+| `NexusPVE-1.0.9-portable.exe` | 117,537,356 bytes | `4e1cf69b2821775c1b73a4012338007dd132755ce0fe0d111752b615d61ca06a` |
+
+The portable asset and its SHA-256 are attached to the [`v1.0.9` release](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.9).
 
 ### Release 1.0.8
 
@@ -153,7 +171,7 @@ npm run preflight
 npm run package
 ```
 
-Output: `release/NexusPVE-1.0.8-portable.exe`.
+Output: `release/NexusPVE-1.0.9-portable.exe`.
 
 For development:
 
@@ -964,7 +982,7 @@ If you discover a security issue, avoid posting live credentials, hostnames, or 
 - The UI is an operator console, not a multi-tenant control plane. Team roles and per-machine grants are enforced locally, but they are not an SSO provider or an enterprise identity boundary.
 - The embedded noVNC console requires a VNC daemon listening on the host's loopback interface. Nexus can install and start that terminal service automatically on SSH hosts (sway/wayvnc/foot, or TigerVNC/xterm), but never exposes it beyond loopback. Proxmox nodes must be present as SSH hosts for the installer; an API token alone cannot install packages.
 - A host whose SSH account is neither root nor able to use sudo needs a manual root-shell install first; the app can prompt for a sudo password but cannot create sudo rights.
-- The project is version `1.0.8`; review changes and test against a lab before relying on it for production recovery or attack response.
+- The project is version `1.0.9`; review changes and test against a lab before relying on it for production recovery or attack response.
 
 ---
 

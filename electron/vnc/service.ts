@@ -404,6 +404,13 @@ export class VncService {
     return session.public;
   }
 
+  /** Public session metadata only; the WebSocket token never leaves open(). */
+  list(): VncSession[] {
+    return [...this.sessions.values()]
+      .map((session) => session.public)
+      .sort((left, right) => left.expiresAt - right.expiresAt);
+  }
+
   async preflight(hostId: string): Promise<VncPreflight> {
     const host = this.store.sshHost(hostId);
     if (!host) throw new Error(`Unknown Linux host: ${hostId}`);

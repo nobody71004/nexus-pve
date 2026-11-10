@@ -333,6 +333,17 @@ try {
   );
   check("authorized_keys contains both keys before enforcement", readFileSync(authorizedPath, "utf8").includes(unknownLine) && readFileSync(authorizedPath, "utf8").includes("nexus/smoke-operator/smoke-key"));
 
+  const sshStatus = await call("ssh.status", { host: "ssh-smoke" });
+  check(
+    "SSH probe includes GPU and hardware telemetry surfaces",
+    sshStatus.isError === false &&
+      Array.isArray(sshStatus.json?.gpus) &&
+      Array.isArray(sshStatus.json?.blockDevices) &&
+      Array.isArray(sshStatus.json?.nics) &&
+      Array.isArray(sshStatus.json?.temps),
+    `${sshStatus.json?.gpus?.length ?? 0} GPUs / ${sshStatus.json?.blockDevices?.length ?? 0} disks`,
+  );
+
   const afterDeploy = await call("sshkey.scan", { host: "ssh-smoke" });
   check(
     "key-auth scan classifies the deployed key as managed and protects the login key",

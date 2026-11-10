@@ -6,6 +6,22 @@ const UPID = (node, type, id) => `UPID:${node}:0000A1B2:000C3D4E:${Math.floor(Da
 
 const NODES = ["pve-smoke", "pve-smoke2"];
 
+// PVE-mods injects raw `sensors -j` output into /nodes/{node}/status as a JSON
+// string; stock Proxmox has no /sensors endpoint. pve-smoke exercises the
+// /status path, pve-smoke2 exercises the PVE 9 hardware sensors endpoint.
+const SENSORS_OUTPUT = JSON.stringify({
+  "coretemp-isa-0000": {
+    Adapter: "ISA adapter",
+    "Package id 0": { temp1_input: 47, temp1_max: 84, temp1_crit: 100 },
+    "Core 0": { temp2_input: 44, temp2_max: 84, temp2_crit: 100 },
+    "Core 1": { temp3_input: 43, temp3_max: 84, temp3_crit: 100 },
+  },
+  "nvme-pci-0100": {
+    Adapter: "PCI adapter",
+    Composite: { temp1_input: 38, temp1_max: 81.85, temp1_crit: 84.85 },
+  },
+});
+
 function vm(node, vmid, name, type, status) {
   const running = status === "running";
   return {
@@ -179,6 +195,7 @@ export async function startMockServer(port = 0) {
             rootfs: { used: 210 * 1024 ** 3, free: 690 * 1024 ** 3, total: 900 * 1024 ** 3, avail: 690 * 1024 ** 3 },
             pveversion: "pve-manager/8.3.2/smoke",
             "current-kernel": { version: "6.8.12-4-pve" },
+            ...(node === "pve-smoke" ? { sensorsOutput: SENSORS_OUTPUT } : {}),
           });
         }
         if (route[2] === "rrddata") {
@@ -261,6 +278,16 @@ export async function startMockServer(port = 0) {
               device_name: "Audio controller",
             },
           ]);
+        }
+        if (route[2] === "hardware" && route[3] === "sensors" && route[4] === "temperature" && route[5] === "cpu") {
+          return send(
+            node === "pve-smoke2"
+              ? [
+                  { sensor: "k10temp/Tctl", temperature: 61.5, unit: "celsius", driver: "k10temp", package: 0 },
+                  { sensor: "k10temp/Tccd1", temperature: 54, unit: "celsius", driver: "k10temp", package: 0 },
+                ]
+              : [],
+          );
         }
         if (route[2] === "sensors") {
           return fail(500, "no sensors found");

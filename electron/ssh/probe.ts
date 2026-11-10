@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { GPU_PROBE_BODY, parseGpuProbe } from "./gpu";
 import { execSsh2 } from "./transport";
 import type {
   SshDisk,
@@ -39,7 +40,10 @@ cat /proc/loadavg 2>/dev/null || true
 head -1 /proc/stat 2>/dev/null || true
 sleep 0.4
 head -1 /proc/stat 2>/dev/null || true
-awk -F: '/cpu MHz/ {s+=$2; n++} END {if (n>0) printf "%.0f\\n", s/n}' /proc/cpuinfo 2>/dev/null || true
+echo "mhz=$(awk -F: '/cpu MHz/ {s+=$2; n++} END {if (n>0) printf "%.0f", s/n}' /proc/cpuinfo 2>/dev/null)"
+echo "sockets=$(awk -F: '/^physical id/ {gsub(/ /,"",$2); if (!seen[$2]++) n++} END {print n+0}' /proc/cpuinfo 2>/dev/null)"
+echo "physical_cores=$(awk -F: '/^physical id/ {s=$2} /^core id/ {c=$2; gsub(/ /,"",s); gsub(/ /,"",c); k=s":"c; if (!seen[k]++) n++} END {print n+0}' /proc/cpuinfo 2>/dev/null)"
+echo "cores_per_socket=$(awk -F: '/^cpu cores/ {gsub(/ /,"",$2); print $2; exit}' /proc/cpuinfo 2>/dev/null)"
 
 echo "@@mem"
 grep -E '^(MemTotal|MemFree|MemAvailable|Buffers|Cached|SwapTotal|SwapFree):' /proc/meminfo 2>/dev/null || true
@@ -48,10 +52,22 @@ echo "@@disk"
 df -B1 -x tmpfs -x devtmpfs -x squashfs -x overlay -x ramfs 2>/dev/null | tail -n +2 || true
 
 echo "@@block"
-lsblk -dno NAME,MODEL,SIZE,ROTA 2>/dev/null | head -12 || true
+lsblk -bdno NAME,TYPE,MODEL,SIZE,ROTA,SERIAL -P 2>/dev/null | head -12 || true
 
 echo "@@net"
 cat /proc/net/dev 2>/dev/null || true
+
+echo "@@netinfo"
+for iface in /sys/class/net/*; do
+  [ -e "$iface" ] || continue
+  name=$(basename "$iface")
+  [ "$name" = "lo" ] && continue
+  speed=$(cat "$iface/speed" 2>/dev/null || true)
+  state=$(cat "$iface/operstate" 2>/dev/null || true)
+  mtu=$(cat "$iface/mtu" 2>/dev/null || true)
+  mac=$(cat "$iface/address" 2>/dev/null || true)
+  echo "$name|$speed|$state|$mtu|$mac"
+done
 
 echo "@@temp"
 for zone in /sys/class/thermal/thermal_zone*; do
@@ -62,7 +78,9 @@ for chip in /sys/class/hwmon/hwmon*; do
   [ -r "$chip/name" ] || continue
   for t in "$chip"/temp*_input; do
     [ -r "$t" ] || continue
-    echo "$(cat "$chip/name" 2>/dev/null)-$(basename "$t" _input)|$(cat "$t" 2>/dev/null)"
+    label=$(cat "\${t%_input}_label" 2>/dev/null)
+    [ -n "$label" ] || label=$(basename "$t" _input)
+    echo "$(cat "$chip/name" 2>/dev/null)-$label|$(cat "$t" 2>/dev/null)"
   done
 done
 
@@ -107,6 +125,8 @@ SSHD=$(command -v sshd || echo /usr/sbin/sshd)
 if [ -x "$SSHD" ]; then
   { "$SSHD" -T 2>/dev/null || sudo -n "$SSHD" -T 2>/dev/null; } | grep -E '^(passwordauthentication|permitrootlogin) ' || true
 fi
+
+${GPU_PROBE_BODY}
 
 echo "@@end"
 `;
@@ -365,18 +385,54 @@ function parseDisks(lines: string[] | undefined): SshDisk[] {
 function parseBlocks(lines: string[] | undefined): SshSnapshot["blockDevices"] {
   const out: SshSnapshot["blockDevices"] = [];
   for (const line of clean(lines)) {
+    // Modern probes use lsblk -P so MODEL may contain spaces. Keep the legacy
+    // whitespace parser as a fallback for older captured output.
+    const pairs: Record<string, string> = {};
+    for (const match of line.matchAll(/([A-Z]+)="([^"]*)"/g)) pairs[match[1]] = match[2];
+    if (pairs.NAME) {
+      const type = pairs.TYPE?.trim();
+      if (type && type !== "disk") continue;
+      const serial = pairs.SERIAL?.trim();
+      out.push({
+        name: pairs.NAME,
+        model: pairs.MODEL?.trim() || pairs.NAME,
+        size: Number(pairs.SIZE) || 0,
+        rotational: pairs.ROTA === "1",
+        ...(type ? { type } : {}),
+        ...(serial ? { serial } : {}),
+      });
+      continue;
+    }
     const parts = line.split(/\s+/);
     if (parts.length < 3) continue;
     const rotational = parts[parts.length - 1] === "1";
     const size = parts[parts.length - 2];
     const name = parts[0];
     const model = parts.slice(1, parts.length - 2).join(" ") || name;
-    const bytes = /^(\d+(?:\.\d+)?)([KMGT]?)i?B?$/.exec(size);
-    const unit = bytes?.[2] ?? "";
+    const sizeMatch = /^(\d+(?:\.\d+)?)([KMGT]?)i?B?$/.exec(size);
+    const unit = sizeMatch?.[2] ?? "";
     const scale = unit === "T" ? 1024 ** 4 : unit === "G" ? 1024 ** 3 : unit === "M" ? 1024 ** 2 : unit === "K" ? 1024 : 1;
-    out.push({ name, model, size: bytes ? Number(bytes[1]) * scale : 0, rotational });
+    out.push({ name, model, size: sizeMatch ? Number(sizeMatch[1]) * scale : 0, rotational });
   }
   return out.slice(0, 6);
+}
+
+function parseNicInfo(lines: string[] | undefined): Map<string, Partial<SshSnapshot["nics"][number]>> {
+  const out = new Map<string, Partial<SshSnapshot["nics"][number]>>();
+  for (const line of clean(lines)) {
+    const fields = line.split("|");
+    const name = fields[0]?.trim();
+    if (!name) continue;
+    const speed = num(fields[1]);
+    const mtu = num(fields[3]);
+    out.set(name, {
+      ...(speed > 0 ? { speedMbps: speed } : {}),
+      ...(fields[2]?.trim() ? { state: fields[2].trim() } : {}),
+      ...(mtu > 0 ? { mtu } : {}),
+      ...(fields[4]?.trim() ? { mac: fields[4].trim() } : {}),
+    });
+  }
+  return out;
 }
 
 /** Tunnel and container plumbing carries counters but is not a real uplink. */
@@ -402,7 +458,7 @@ const NOISE_NICS = [
   /^bond/,
 ];
 
-function parseNics(lines: string[] | undefined): SshNic[] {
+function parseNics(lines: string[] | undefined, info = new Map<string, Partial<SshNic>>()): SshNic[] {
   const out: SshNic[] = [];
   for (const line of clean(lines)) {
     const at = line.indexOf(":");
@@ -414,7 +470,7 @@ function parseNics(lines: string[] | undefined): SshNic[] {
     const rx = Number(values[0]) || 0;
     const tx = Number(values[8]) || 0;
     if (rx + tx === 0) continue;
-    out.push({ name, rx, tx });
+    out.push({ name, rx, tx, ...(info.get(name) ?? {}) });
   }
   return out.sort((left, right) => right.rx + right.tx - (left.rx + left.tx)).slice(0, 5);
 }
@@ -425,7 +481,7 @@ function parseTemps(lines: string[] | undefined): SshSnapshot["temps"] {
   for (const line of clean(lines)) {
     const at = line.indexOf("|");
     if (at < 0) continue;
-    const label = line.slice(0, at).replace(/^(thermal_)?/, "").trim() || "sensor";
+    const label = line.slice(0, at).replace(/^(thermal_)?/, "").replace(/-thermal_zone\d+$/, "").trim() || "sensor";
     const raw = num(line.slice(at + 1));
     const celsius = raw > 1000 ? raw / 1000 : raw;
     if (!(celsius > 0 && celsius < 150)) continue;
@@ -433,7 +489,7 @@ function parseTemps(lines: string[] | undefined): SshSnapshot["temps"] {
     seen.add(label);
     out.push({ label: label.slice(0, 24), celsius: Math.round(celsius * 10) / 10 });
   }
-  return out.slice(0, 6);
+  return out.slice(0, 8);
 }
 
 function parseProcesses(lines: string[] | undefined): SshSnapshot["processes"] {
@@ -482,7 +538,15 @@ export function parseProbe(
     return raw?.replace(new RegExp(`^\s*${key}\s+`, "i"), "").trim() || undefined;
   };
   const osName = (ident.PRETTY_NAME ?? "").replace(/^"|"$/g, "").trim() || "Linux";
+  const cpuMeta = kv(cpuLines);
+  const sockets = Number(cpuMeta.sockets) || undefined;
+  const coresPerSocket = Number(cpuMeta.cores_per_socket) || undefined;
+  const physicalCores =
+    Number(cpuMeta.physical_cores) ||
+    (sockets && coresPerSocket ? sockets * coresPerSocket : undefined);
+  const mhz = Number(cpuMeta.mhz) || undefined;
   const pressure = parsePressure(parts.get("psi"));
+  const gpuResult = parseGpuProbe(stdout);
 
   const services: SshSnapshot["services"] = clean(parts.get("svc")).map((name) => ({ name, state: "running" }));
   const unitName = /^[A-Za-z0-9@_.:\\-]+$/;
@@ -510,9 +574,11 @@ export function parseProbe(
     cpu: {
       model: cpuLines[0] ?? "",
       cores: Number(cpuLines[1]) || 0,
+      ...(physicalCores ? { physicalCores } : {}),
+      ...(sockets ? { sockets } : {}),
       load: cpuStats.load,
       usage: cpuStats.usage,
-      mhz: Number(cpuLines[cpuLines.length - 1]) || undefined,
+      mhz,
       breakdown: cpuStats.breakdown,
     },
     pressure,
@@ -525,8 +591,10 @@ export function parseProbe(
     },
     disks: parseDisks(parts.get("disk")),
     blockDevices: parseBlocks(parts.get("block")),
-    nics: parseNics(parts.get("net")),
+    nics: parseNics(parts.get("net"), parseNicInfo(parts.get("netinfo"))),
     temps: parseTemps(parts.get("temp")),
+    gpus: gpuResult.gpus,
+    ...(gpuResult.error ? { gpuError: gpuResult.error } : {}),
     services,
     containers: parseContainers(parts.get("docker")),
     processes: parseProcesses(parts.get("proc")),
