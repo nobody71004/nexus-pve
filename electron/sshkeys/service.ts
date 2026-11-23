@@ -9,8 +9,11 @@ import type {
   NexusEvent,
   SshKeyDeployResult,
   SshKeyEnforceResult,
+  SshKeyAssignee,
   SshKeyEvent,
   SshKeyHostReport,
+  SshKeyIssueInput,
+  SshKeyIssueResult,
   SshKeyOverview,
   SshKeyPolicy,
 } from "../../shared/types";
@@ -33,6 +36,24 @@ interface StoredSshKeyState {
   trusted: Record<string, string[]>;
   reports: Record<string, SshKeyHostReport>;
   events: SshKeyEvent[];
+}
+
+export interface RevokedMemberKey {
+  keyId: string;
+  label: string;
+  username: string;
+  hostId?: string;
+}
+
+export interface MemberKeyRevocationFailure {
+  keyId: string;
+  label: string;
+  error: string;
+}
+
+export interface MemberKeyRevocationResult {
+  revoked: RevokedMemberKey[];
+  failed: MemberKeyRevocationFailure[];
 }
 
 const DEFAULT_POLICY: SshKeyPolicy = {
@@ -187,11 +208,17 @@ export class SshKeyService {
   private timer: NodeJS.Timeout | null = null;
   private initial: NodeJS.Timeout | null = null;
   private emit: ((event: NexusEvent) => void) | null = null;
+  private accessReconciler: (() => Promise<unknown>) | null = null;
 
   constructor(private readonly store: ConfigStore = configStore) {}
 
   bindEmit(emit: (event: NexusEvent) => void): void {
     this.emit = emit;
+  }
+
+  /** Re-check team-granted keys on the watcher interval, even while scanning is paused. */
+  bindAccessReconciler(reconciler: (() => Promise<unknown>) | null): void {
+    this.accessReconciler = reconciler;
   }
 
   start(): void {
@@ -227,10 +254,20 @@ export class SshKeyService {
 
   async tick(): Promise<void> {
     if (this.busy) return;
-    const data = this.read();
-    if (!data.policy.enabled) return;
     this.busy = true;
     try {
+      if (this.accessReconciler) {
+        try {
+          await this.accessReconciler();
+        } catch (error) {
+          // A failed re-check must never stop host scanning; the next tick retries.
+          const failed = this.read();
+          this.record(failed, "error", false, `Member key access check failed: ${this.message(error)}`);
+          this.persist(failed);
+        }
+      }
+      const data = this.read();
+      if (!data.policy.enabled) return;
       for (const host of this.store.sshHosts()) {
         try {
           const report = await this.scanHost(host, data);
@@ -308,12 +345,164 @@ export class SshKeyService {
     return this.overview();
   }
 
-  async deploy(hostRef: string, keyRef: string): Promise<SshKeyDeployResult> {
-    const host = this.requireHost(hostRef);
+  /**
+   * Issue a personal key for one workspace member and one machine. The public
+   * half is appended to the configured account's authorized_keys; the private
+   * half is returned exactly once and stored encrypted in the vault.
+   */
+  async issue(input: SshKeyIssueInput, assignee: SshKeyAssignee): Promise<SshKeyIssueResult> {
+    const host = this.requireHost(input.hostId);
     const data = this.read();
-    const key = this.requireKey(data, keyRef);
-    if (key.status !== "active") throw new Error(`${key.label} is revoked and cannot be deployed`);
-    const line = key.publicKey;
+    const existing = data.keys.find(
+      (entry) =>
+        entry.status === "active" && entry.assignedTo?.id === assignee.id && entry.issuedHostId === host.id,
+    );
+    if (existing && input.rotate !== true) {
+      throw new Error(`@${assignee.username} already has an active key for ${host.label}. Rotate it instead.`);
+    }
+    const labelInput = input.label?.trim() || `${assignee.username}@${host.label}`;
+    const label = cleanText(labelInput.slice(0, 64), "Key label", 64);
+    const generated = utils.generateKeyPairSync("ed25519");
+    const comment = `nexus/${assignee.username}/${host.label}/${label}`
+      .replace(/[^\w .@/-]+/g, "-")
+      .replace(/\s+/g, "-");
+    const publicKeyLine = `${generated.public} ${comment}`;
+    const fingerprint = fingerprintOfPublicKey(generated.public);
+    const appended = await this.appendAuthorizedKey(host, publicKeyLine);
+    const parsed = appended.parsed;
+    const id = crypto.randomUUID();
+    const now = Date.now();
+    const key: StoredSshKey = {
+      id,
+      label,
+      owner: assignee.displayName,
+      comment,
+      algorithm: "ssh-ed25519",
+      fingerprint,
+      publicKey: publicKeyLine,
+      createdAt: now,
+      status: "active",
+      hosts: [host.id],
+      lastDeployedAt: now,
+      assignedTo: assignee,
+      issuedHostId: host.id,
+      privateKeyEnc: encryptSecret(generated.private),
+    };
+    data.keys.push(key);
+    const report = data.reports[host.id];
+    if (report) {
+      if (!report.keys.some((entry) => entry.fingerprint === fingerprint)) {
+        report.keys.push({
+          fingerprint,
+          type: "ssh-ed25519",
+          comment,
+          publicKey: publicKeyLine,
+          source: "managed",
+          keyId: id,
+          owner: assignee.displayName,
+          firstSeenAt: now,
+        });
+        report.managed = report.keys.filter((entry) => entry.source === "managed").length;
+      }
+      report.exists = true;
+      report.mode = parsed.mode ?? report.mode;
+      report.scannedAt = now;
+    }
+    this.record(
+      data,
+      "issue",
+      true,
+      `Issued ${label} to @${assignee.username} on ${host.label} (${fingerprint.slice(0, 20)}…)`,
+      host.id,
+      host.label,
+    );
+    this.persist(data);
+    this.emitOverview();
+
+    let warning: string | undefined;
+    if (existing) {
+      try {
+        await this.revoke(existing.id, true);
+      } catch (error) {
+        warning = `The new key is active, but the previous key could not be fully removed: ${this.message(error)}`;
+        this.record(data, "error", false, warning, host.id, host.label);
+        this.persist(data);
+      }
+    }
+    return {
+      key: publicKey(key),
+      privateKey: generated.private,
+      publicKey: publicKeyLine,
+      fingerprint,
+      host: {
+        id: host.id,
+        label: host.label,
+        host: host.host,
+        port: host.port,
+        username: host.username,
+      },
+      path: parsed.path ?? "~/.ssh/authorized_keys",
+      connect: `ssh -i nexus-${assignee.username}-${host.label.replace(/[^\w.-]+/g, "-")}.key -p ${host.port} ${host.username}@${host.host}`,
+      ...(warning ? { warning } : {}),
+    };
+  }
+
+  /** Active member keys for one account; never includes private material. */
+  issuedTo(userId: string): ManagedSshKey[] {
+    return this.read()
+      .keys.filter((key) => key.status === "active" && key.assignedTo?.id === userId)
+      .map(publicKey)
+      .sort((left, right) => right.createdAt - left.createdAt);
+  }
+
+  /**
+   * Retire active member keys whose member or issued machine is no longer
+   * entitled to them. Keys for still-valid grants are left untouched, and a
+   * failed remote removal is returned so callers (and the next tick) can retry.
+   */
+  async revokeUnauthorizedMemberKeys(
+    canUseKey: (userId: string, hostId?: string) => boolean,
+  ): Promise<MemberKeyRevocationResult> {
+    const data = this.read();
+    const candidates = data.keys.filter(
+      (key): key is StoredSshKey & { assignedTo: SshKeyAssignee } =>
+        key.status === "active" &&
+        Boolean(key.assignedTo) &&
+        !canUseKey(key.assignedTo!.id, key.issuedHostId),
+    );
+    const result: MemberKeyRevocationResult = { revoked: [], failed: [] };
+    for (const key of candidates) {
+      try {
+        await this.revoke(key.id, true);
+        result.revoked.push({
+          keyId: key.id,
+          label: key.label,
+          username: key.assignedTo.username,
+          ...(key.issuedHostId ? { hostId: key.issuedHostId } : {}),
+        });
+      } catch (error) {
+        result.failed.push({ keyId: key.id, label: key.label, error: this.message(error) });
+      }
+    }
+    if (result.failed.length > 0) {
+      const latest = this.read();
+      const detail = result.failed.map((entry) => `${entry.label}: ${entry.error}`).join("; ").slice(0, 1_000);
+      this.record(
+        latest,
+        "error",
+        false,
+        `Team access changed, but ${result.failed.length} member key${result.failed.length === 1 ? "" : "s"} could not be revoked: ${detail}`,
+      );
+      this.persist(latest);
+      this.emitOverview();
+    }
+    return result;
+  }
+
+  private async appendAuthorizedKey(
+    host: { id: string; label: string },
+    line: string,
+  ): Promise<{ parsed: Record<string, string>; output: string }> {
     const keyB64 = line.split(/\s+/)[1];
     if (!keyB64) throw new Error("Managed key has no public key material");
     const script = [
@@ -338,7 +527,16 @@ export class SshKeyService {
     ].join("\n");
     const result = await runRemote(sshRunner(this.store, host.id, 30_000), script, "bash");
     if (!result.ok) throw new Error(`Deploy to ${host.label} failed: ${(result.stderr || result.stdout).trim().slice(0, 1_000)}`);
-    const parsed = parsePairLines(result.stdout);
+    return { parsed: parsePairLines(result.stdout), output: result.stdout };
+  }
+
+  async deploy(hostRef: string, keyRef: string): Promise<SshKeyDeployResult> {
+    const host = this.requireHost(hostRef);
+    const data = this.read();
+    const key = this.requireKey(data, keyRef);
+    if (key.status !== "active") throw new Error(`${key.label} is revoked and cannot be deployed`);
+    const appended = await this.appendAuthorizedKey(host, key.publicKey);
+    const parsed = appended.parsed;
     const file = this.ensurePrivateFile(key, data);
     this.store.saveSshHost({
       id: host.id,
@@ -364,7 +562,7 @@ export class SshKeyService {
       path: parsed.path ?? "~/.ssh/authorized_keys",
       mode: parsed.mode,
       added: parsed.state === "added",
-      output: result.stdout.trim(),
+      output: appended.output.trim(),
     };
   }
 

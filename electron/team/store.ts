@@ -7,7 +7,14 @@ import type { SshHostSummary } from "../../shared/types";
 import type {
   TeamActivityEntry,
   TeamAuthState,
+  TeamBoard,
+  TeamBoardList,
+  TeamBoardTask,
+  TeamBoardTaskInput,
+  TeamBoardTaskPatch,
   TeamBootstrapInput,
+  TeamChat,
+  TeamChatMessage,
   TeamLoginInput,
   TeamMachine,
   TeamOverview,
@@ -21,6 +28,10 @@ import type {
 import type {
   TeamAuditFilter,
   TeamAuditResult,
+  TeamSyncBoardList,
+  TeamSyncBoardTask,
+  TeamSyncBoardTombstone,
+  TeamSyncChatMessage,
   TeamSyncMachine,
   TeamSyncMachineTombstone,
   TeamSyncSnapshot,
@@ -41,6 +52,21 @@ const LOGIN_MAX_FAILURES = 5;
 const AUDIT_DEFAULT_LIMIT = 250;
 const AUDIT_MAX_LIMIT = 2_000;
 const SYNC_ACTIVITY_LIMIT = 1_000;
+const CHAT_VIEW_LIMIT = 300;
+const CHAT_SYNC_LIMIT = 500;
+const CHAT_STORE_LIMIT = 1_000;
+const CHAT_BODY_MAX = 2_000;
+const BOARD_LIST_LIMIT = 12;
+const BOARD_TASK_LIMIT = 1_000;
+const BOARD_LIST_TITLE_MAX = 40;
+const BOARD_TASK_TITLE_MAX = 140;
+const BOARD_TASK_DETAIL_MAX = 2_000;
+const TEAM_SCHEMA_VERSION = 2;
+const DEFAULT_BOARD_LISTS = [
+  { id: "board-list-todo", title: "To do", position: 0 },
+  { id: "board-list-doing", title: "In progress", position: 1 },
+  { id: "board-list-done", title: "Done", position: 2 },
+] as const;
 
 function uid(): string {
   return crypto.randomUUID();
@@ -67,7 +93,7 @@ function normalizePassword(value: string): string {
 }
 
 function normalizeRole(value: string): TeamRole {
-  if (value === "admin" || value === "moderator" || value === "user") return value;
+  if (value === "superadmin" || value === "admin" || value === "moderator" || value === "user") return value;
   throw new Error("Unknown team role.");
 }
 
@@ -77,11 +103,46 @@ function normalizeStatus(value: string): TeamStatus {
 }
 
 function roleLabel(role: TeamRole): string {
-  return role === "admin" ? "Admin" : role === "moderator" ? "Moderator" : "Member";
+  return role === "superadmin"
+    ? "Super admin"
+    : role === "admin"
+      ? "Admin"
+      : role === "moderator"
+        ? "Moderator"
+        : "Member";
 }
 
 function machineKey(host: string, port: number, username: string): string {
   return `${host.trim().toLowerCase()}:${port}:${username.trim().toLowerCase()}`;
+}
+
+function normalizeChatBody(value: unknown): string {
+  const body = typeof value === "string" ? value.replace(/\r\n/g, "\n").trim() : "";
+  if (!body) throw new Error("Write a message before sending.");
+  if (body.length > CHAT_BODY_MAX) throw new Error(`Chat messages are limited to ${CHAT_BODY_MAX} characters.`);
+  return body;
+}
+
+function normalizeBoardListTitle(value: unknown): string {
+  const title = typeof value === "string" ? value.trim() : "";
+  if (!title) throw new Error("Give the list a name.");
+  if (title.length > BOARD_LIST_TITLE_MAX) throw new Error(`List names are limited to ${BOARD_LIST_TITLE_MAX} characters.`);
+  return title;
+}
+
+function normalizeBoardTaskTitle(value: unknown): string {
+  const title = typeof value === "string" ? value.trim() : "";
+  if (!title) throw new Error("Give the task a title.");
+  if (title.length > BOARD_TASK_TITLE_MAX) throw new Error(`Task titles are limited to ${BOARD_TASK_TITLE_MAX} characters.`);
+  return title;
+}
+
+function normalizeBoardTaskDetail(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const detail = typeof value === "string" ? value.trim() : "";
+  if (!detail) return undefined;
+  if (detail.length > BOARD_TASK_DETAIL_MAX) throw new Error(`Task notes are limited to ${BOARD_TASK_DETAIL_MAX} characters.`);
+  return detail;
 }
 
 function csvCell(value: unknown): string {
@@ -153,7 +214,7 @@ export class TeamService {
         id TEXT PRIMARY KEY,
         username TEXT NOT NULL UNIQUE,
         display_name TEXT NOT NULL,
-        role TEXT NOT NULL CHECK (role IN ('admin', 'moderator', 'user')),
+        role TEXT NOT NULL CHECK (role IN ('superadmin', 'admin', 'moderator', 'user')),
         status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
         password_salt TEXT NOT NULL,
         password_hash TEXT NOT NULL,
@@ -234,6 +295,53 @@ export class TeamService {
         deleted_at INTEGER NOT NULL
       )
     `);
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS team_chat_messages (
+        id TEXT PRIMARY KEY,
+        author_id TEXT,
+        author_username TEXT NOT NULL,
+        author_name TEXT NOT NULL,
+        author_role TEXT NOT NULL,
+        body TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )
+    `);
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS team_board_lists (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        created_by_username TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    `);
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS team_board_tasks (
+        id TEXT PRIMARY KEY,
+        list_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        detail TEXT,
+        pinned INTEGER NOT NULL DEFAULT 0,
+        author_username TEXT NOT NULL,
+        author_name TEXT NOT NULL,
+        author_role TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    `);
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS board_list_tombstones (
+        id TEXT PRIMARY KEY,
+        deleted_at INTEGER NOT NULL
+      )
+    `);
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS board_task_tombstones (
+        id TEXT PRIMARY KEY,
+        deleted_at INTEGER NOT NULL
+      )
+    `);
     this.ensureColumn("machines", "source", "TEXT NOT NULL DEFAULT 'local'");
     this.ensureColumn("machines", "links_updated_at", "INTEGER NOT NULL DEFAULT 0");
     this.db.run("CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id)");
@@ -242,9 +350,122 @@ export class TeamService {
     this.db.run("CREATE INDEX IF NOT EXISTS activity_at ON activity(at)");
     this.db.run("CREATE INDEX IF NOT EXISTS activity_actor ON activity(actor_id)");
     this.db.run("CREATE INDEX IF NOT EXISTS login_throttle_lock ON login_throttle(locked_until)");
+    this.db.run("CREATE INDEX IF NOT EXISTS team_chat_created ON team_chat_messages(created_at)");
+    this.db.run("CREATE INDEX IF NOT EXISTS board_tasks_list ON team_board_tasks(list_id)");
+    this.db.run("CREATE INDEX IF NOT EXISTS board_tasks_updated ON team_board_tasks(updated_at)");
     this.db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('workspace_name', 'Nexus Operations')");
     this.db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('workspace_updated_at', ?)", [Date.now()]);
     this.db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('schema_version', '1')");
+    this.migrateMachineLinkRevisions();
+    this.migrateSuperAdminRole();
+    this.ensureSuperAdminPresent();
+    this.ensureDefaultBoardLists();
+  }
+
+  /**
+   * Pre-1.0.12 created local machine rows with links_updated_at set to the
+   * insert time. That makes a real grant from another computer look older, so
+   * a later sync never applies it. Reset only rows whose revision is still the
+   * exact insert marker and which have no link or machine-link audit history;
+   * rows with any evidence of an edit keep their revision.
+   */
+  private migrateMachineLinkRevisions(): void {
+    const current = this.one("SELECT value FROM settings WHERE key = 'schema_version'");
+    if (Number(current?.value ?? 0) >= TEAM_SCHEMA_VERSION) return;
+
+    this.transaction(() => {
+      this.run(`
+        UPDATE machines
+        SET links_updated_at = 0
+        WHERE source = 'local'
+          AND links_updated_at > 0
+          AND links_updated_at = updated_at
+          AND NOT EXISTS (
+            SELECT 1 FROM machine_links WHERE machine_links.machine_id = machines.id
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM activity
+            WHERE activity.action = 'machine.links'
+              AND activity.target_type = 'machine'
+              AND activity.target_id = machines.id
+          )
+      `);
+      this.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', ?)", [
+        String(TEAM_SCHEMA_VERSION),
+      ]);
+    });
+  }
+
+  private ensureDefaultBoardLists(): void {
+    if (this.count("SELECT COUNT(*) AS count FROM team_board_lists") > 0) return;
+    const now = Date.now();
+    for (const list of DEFAULT_BOARD_LISTS) {
+      this.run(
+        "INSERT OR IGNORE INTO team_board_lists (id, title, position, created_by_username, created_at, updated_at) VALUES (?, ?, ?, 'system', ?, ?)",
+        [list.id, list.title, list.position, now, now],
+      );
+    }
+  }
+
+  /**
+   * SQLite cannot widen an existing CHECK constraint in place. Older Nexus
+   * databases only allow admin/moderator/user, so rebuild the users table once
+   * while preserving every id, password hash, session and machine link.
+   */
+  private migrateSuperAdminRole(): void {
+    const table = this.one("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'");
+    if (!table || String(table.sql ?? "").toLowerCase().includes("superadmin")) return;
+
+    this.db.run("PRAGMA foreign_keys = OFF");
+    try {
+      this.transaction(() => {
+        this.db.run("DROP TABLE IF EXISTS users_superadmin_migration");
+        this.db.run(`
+          CREATE TABLE users_superadmin_migration (
+            id TEXT PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            display_name TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('superadmin', 'admin', 'moderator', 'user')),
+            status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
+            password_salt TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            last_login_at INTEGER
+          )
+        `);
+        this.run(`
+          INSERT INTO users_superadmin_migration
+            (id, username, display_name, role, status, password_salt, password_hash, created_at, updated_at, last_login_at)
+          SELECT id, username, display_name, role, status, password_salt, password_hash, created_at, updated_at, last_login_at
+          FROM users
+        `);
+        this.db.run("DROP TABLE users");
+        this.db.run("ALTER TABLE users_superadmin_migration RENAME TO users");
+      });
+    } finally {
+      this.db.run("PRAGMA foreign_keys = ON");
+    }
+  }
+
+  /**
+   * The first/owner account is the super admin. Normally bootstrap writes that
+   * role directly; this also repairs a legacy workspace or a sync snapshot that
+   * would otherwise leave no active super admin behind.
+   */
+  private ensureSuperAdminPresent(): void {
+    if (this.count("SELECT COUNT(*) AS count FROM users") === 0) return;
+    if (this.count("SELECT COUNT(*) AS count FROM users WHERE role = 'superadmin' AND status = 'active'") > 0) return;
+
+    // Only an existing admin is eligible. Never silently grant super-admin
+    // rights to a moderator or standard member while repairing legacy data.
+    const owner =
+      this.one("SELECT id FROM users WHERE role = 'admin' AND status = 'active' ORDER BY created_at ASC, rowid ASC LIMIT 1") ??
+      this.one("SELECT id FROM users WHERE role = 'admin' ORDER BY created_at ASC, rowid ASC LIMIT 1");
+    if (!owner) return;
+    this.transaction(() => {
+      this.run("UPDATE users SET role = 'superadmin', updated_at = ? WHERE id = ?", [Date.now(), String(owner.id)]);
+    });
   }
 
   private ensureColumn(table: string, column: string, definition: string): void {
@@ -376,7 +597,7 @@ export class TeamService {
       id,
       username,
       displayName,
-      role: "admin" as const,
+      role: "superadmin" as const,
       status: "active" as const,
       createdAt: now,
       updatedAt: now,
@@ -386,16 +607,16 @@ export class TeamService {
 
     this.transaction(() => {
       this.run(
-        "INSERT INTO users (id, username, display_name, role, status, password_salt, password_hash, created_at, updated_at) VALUES (?, ?, ?, 'admin', 'active', ?, ?, ?, ?)",
+        "INSERT INTO users (id, username, display_name, role, status, password_salt, password_hash, created_at, updated_at) VALUES (?, ?, ?, 'superadmin', 'active', ?, ?, ?, ?)",
         [id, username, displayName, salt, passwordHash, now, now],
       );
       this.audit(
-        { ...user, id, username, displayName, role: "admin", status: "active" },
+        { ...user, id, username, displayName, role: "superadmin", status: "active" },
         "workspace.bootstrap",
         "workspace",
         "workspace",
         "Nexus Operations",
-        "Created the workspace owner account",
+        "Created the workspace owner account as Super admin",
       );
     });
 
@@ -482,7 +703,7 @@ export class TeamService {
     const machines = this.listMachines(actor);
     const activity = this.listActivity(actor);
     const permissions = this.permissions(actor);
-    const admins = users.filter((user) => user.role === "admin").length;
+    const admins = users.filter((user) => user.role === "admin" || user.role === "superadmin").length;
     const moderators = users.filter((user) => user.role === "moderator").length;
     return {
       workspaceName: String(this.one("SELECT value FROM settings WHERE key = 'workspace_name'")?.value ?? "Nexus Operations"),
@@ -511,8 +732,11 @@ export class TeamService {
     }
     const displayName = normalizeDisplayName(input?.displayName ?? "");
     const role = normalizeRole(input?.role ?? "user");
-    if (actor.role !== "admin" && role !== "user") {
-      throw new Error("Only admins can create admins or moderators.");
+    if (actor.role === "moderator" && role !== "user") {
+      throw new Error("Moderators can only create standard members.");
+    }
+    if (role === "superadmin" && actor.role !== "superadmin") {
+      throw new Error("Only a super admin can create another super admin.");
     }
     if (this.one("SELECT id FROM users WHERE username = ?", [username])) {
       throw new Error(`The username “${username}” is already in use.`);
@@ -544,16 +768,27 @@ export class TeamService {
     const nextStatus = patch.status === undefined ? targetStatus : normalizeStatus(patch.status);
     const nextName = patch.displayName === undefined ? String(target.display_name) : normalizeDisplayName(patch.displayName);
 
-    if (actor.role !== "admin" && (targetRole !== "user" || nextRole !== "user")) {
+    if (actor.role === "moderator" && (targetRole !== "user" || nextRole !== "user")) {
       throw new Error("Moderators can only manage standard member accounts.");
+    }
+    if (actor.role !== "superadmin" && (targetRole === "superadmin" || nextRole === "superadmin")) {
+      throw new Error("Only a super admin can manage a super admin.");
     }
     if (id === actor.id && nextRole !== targetRole) throw new Error("You cannot change your own role.");
     if (id === actor.id && nextStatus !== "active") throw new Error("You cannot suspend your own account.");
-    const activeAdmins = this.count("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND status = 'active'");
-    const wasActiveAdmin = targetRole === "admin" && targetStatus === "active";
-    const remainsActiveAdmin = nextRole === "admin" && nextStatus === "active";
-    if (wasActiveAdmin && !remainsActiveAdmin && activeAdmins <= 1) {
-      throw new Error("The workspace needs at least one active admin.");
+    const activeElevated = this.count(
+      "SELECT COUNT(*) AS count FROM users WHERE role IN ('admin', 'superadmin') AND status = 'active'",
+    );
+    const activeSuperAdmins = this.count("SELECT COUNT(*) AS count FROM users WHERE role = 'superadmin' AND status = 'active'");
+    const wasActiveSuperAdmin = targetRole === "superadmin" && targetStatus === "active";
+    const remainsActiveSuperAdmin = nextRole === "superadmin" && nextStatus === "active";
+    if (wasActiveSuperAdmin && !remainsActiveSuperAdmin && activeSuperAdmins <= 1) {
+      throw new Error("The workspace needs at least one active super admin.");
+    }
+    const wasActiveElevated = (targetRole === "admin" || targetRole === "superadmin") && targetStatus === "active";
+    const remainsActiveElevated = (nextRole === "admin" || nextRole === "superadmin") && nextStatus === "active";
+    if (wasActiveElevated && !remainsActiveElevated && activeElevated <= 1) {
+      throw new Error("The workspace needs at least one active admin or super admin.");
     }
 
     let salt: string | null = null;
@@ -597,13 +832,23 @@ export class TeamService {
 
   deleteUser(id: string): TeamOverview {
     const actor = this.currentUser();
-    if (actor.role !== "admin") throw new Error("Only admins can delete accounts.");
+    if (actor.role === "moderator" || actor.role === "user") throw new Error("Admin or super admin access required.");
     if (id === actor.id) throw new Error("You cannot delete the account you are signed in with.");
     const target = this.userRow(id);
     if (!target) throw new Error("Member not found.");
-    const activeAdmins = this.count("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND status = 'active'");
-    if (String(target.role) === "admin" && String(target.status) === "active" && activeAdmins <= 1) {
-      throw new Error("The workspace needs at least one active admin.");
+    const targetRole = normalizeRole(String(target.role));
+    if (targetRole === "superadmin" && actor.role !== "superadmin") {
+      throw new Error("Only a super admin can delete a super admin.");
+    }
+    const activeElevated = this.count(
+      "SELECT COUNT(*) AS count FROM users WHERE role IN ('admin', 'superadmin') AND status = 'active'",
+    );
+    if ((targetRole === "admin" || targetRole === "superadmin") && String(target.status) === "active" && activeElevated <= 1) {
+      throw new Error("The workspace needs at least one active admin or super admin.");
+    }
+    const activeSuperAdmins = this.count("SELECT COUNT(*) AS count FROM users WHERE role = 'superadmin' AND status = 'active'");
+    if (targetRole === "superadmin" && String(target.status) === "active" && activeSuperAdmins <= 1) {
+      throw new Error("The workspace needs at least one active super admin.");
     }
     const targetName = String(target.display_name);
     const now = Date.now();
@@ -632,7 +877,7 @@ export class TeamService {
       if (!target) throw new Error("One of the selected members no longer exists.");
       // Moderators may preserve existing admin/moderator links, but cannot add
       // new ones. Those roles already have implicit access to every machine.
-      if (actor.role !== "admin" && String(target.role) !== "user" && !existing.has(userId)) {
+      if (actor.role === "moderator" && String(target.role) !== "user" && !existing.has(userId)) {
         throw new Error("Moderators can only grant machines to standard members.");
       }
     }
@@ -665,6 +910,64 @@ export class TeamService {
     return this.overview();
   }
 
+  /**
+   * Replace a member's complete machine grant set in one transaction. A
+   * failure while adding or removing any link rolls the whole set back, so the
+   * member can never end up with only part of the selected machines.
+   */
+  setUserMachineLinks(userId: string, machineIds: string[]): TeamOverview {
+    const actor = this.currentUser();
+    this.assertManager(actor);
+    const target = this.userRow(userId);
+    if (!target) throw new Error("Member not found.");
+    if (actor.role === "moderator" && normalizeRole(String(target.role)) !== "user") {
+      throw new Error("Moderators can only manage standard member access.");
+    }
+
+    const wanted = [...new Set(machineIds.filter((id) => typeof id === "string" && id.length > 0))];
+    const available = new Set(this.all("SELECT id FROM machines").map((row) => String(row.id)));
+    if (wanted.some((id) => !available.has(id))) {
+      throw new Error("One of the selected machines no longer exists. Refresh the inventory and try again.");
+    }
+
+    const existing = new Set(
+      this.all("SELECT machine_id FROM machine_links WHERE user_id = ?", [userId]).map((row) => String(row.machine_id)),
+    );
+    const desired = new Set(wanted);
+    const added = wanted.filter((id) => !existing.has(id));
+    const removed = [...existing].filter((id) => !desired.has(id));
+    if (added.length === 0 && removed.length === 0) return this.overview();
+
+    this.transaction(() => {
+      const now = Date.now();
+      for (const machineId of removed) {
+        this.run("DELETE FROM machine_links WHERE user_id = ? AND machine_id = ?", [userId, machineId]);
+      }
+      for (const machineId of added) {
+        this.run("INSERT INTO machine_links (user_id, machine_id, created_at, created_by) VALUES (?, ?, ?, ?)", [
+          userId,
+          machineId,
+          now,
+          actor.id,
+        ]);
+      }
+      for (const machineId of new Set([...added, ...removed])) {
+        this.run("UPDATE machines SET links_updated_at = ? WHERE id = ?", [now, machineId]);
+      }
+      this.audit(
+        actor,
+        "machine.links",
+        "user",
+        userId,
+        String(target.display_name),
+        wanted.length === 0
+          ? "All machine access revoked"
+          : `${wanted.length} machine${wanted.length === 1 ? "" : "s"} granted`,
+      );
+    });
+    return this.overview();
+  }
+
   removeMachine(machineId: string, actor: TeamUser): void {
     if (actor.role === "user") throw new Error("Admin or moderator access required.");
     const machine = this.one("SELECT label, host, port, username FROM machines WHERE id = ?", [machineId]);
@@ -679,6 +982,149 @@ export class TeamService {
       this.run("DELETE FROM machines WHERE id = ?", [machineId]);
       this.audit(actor, "machine.remove", "machine", machineId, String(machine.label), "Removed from the SSH inventory");
     });
+  }
+
+  /* ------------------------------------------------------------ team chat */
+
+  chat(): TeamChat {
+    this.currentUser();
+    const rows = this.all("SELECT * FROM team_chat_messages ORDER BY created_at DESC LIMIT ?", [CHAT_VIEW_LIMIT]);
+    return { messages: rows.reverse().map((row) => this.chatMessageFromRow(row)) };
+  }
+
+  postChatMessage(body: string): TeamChat {
+    const actor = this.currentUser();
+    const text = normalizeChatBody(body);
+    const now = Date.now();
+    this.transaction(() => {
+      this.run(
+        "INSERT INTO team_chat_messages (id, author_id, author_username, author_name, author_role, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [uid(), actor.id, actor.username, actor.displayName, actor.role, text, now],
+      );
+      this.run(
+        "DELETE FROM team_chat_messages WHERE id NOT IN (SELECT id FROM team_chat_messages ORDER BY created_at DESC LIMIT ?)",
+        [CHAT_STORE_LIMIT],
+      );
+    });
+    return this.chat();
+  }
+
+  /* -------------------------------------------------------------- billboard */
+
+  board(): TeamBoard {
+    this.currentUser();
+    return { lists: this.listBoardLists(), tasks: this.listBoardTasks() };
+  }
+
+  createBoardList(title: string): TeamBoard {
+    const actor = this.currentUser();
+    if (this.count("SELECT COUNT(*) AS count FROM team_board_lists") >= BOARD_LIST_LIMIT) {
+      throw new Error(`The billboard is limited to ${BOARD_LIST_LIMIT} lists.`);
+    }
+    const name = normalizeBoardListTitle(title);
+    const next = this.one("SELECT COALESCE(MAX(position), -1) + 1 AS position FROM team_board_lists");
+    const now = Date.now();
+    this.transaction(() => {
+      this.run(
+        "INSERT INTO team_board_lists (id, title, position, created_by_username, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        [uid(), name, Number(next?.position ?? 0), actor.username, now, now],
+      );
+    });
+    return this.board();
+  }
+
+  deleteBoardList(id: string): TeamBoard {
+    const actor = this.currentUser();
+    const list = this.one("SELECT * FROM team_board_lists WHERE id = ?", [id]);
+    if (!list) throw new Error("Board list not found.");
+    if (this.count("SELECT COUNT(*) AS count FROM team_board_lists") <= 1) {
+      throw new Error("Keep at least one board list.");
+    }
+    if (actor.role === "user" && String(list.created_by_username ?? "") !== actor.username) {
+      throw new Error("Only the list creator, an admin or a moderator can delete this list.");
+    }
+    const taskIds = this.all("SELECT id FROM team_board_tasks WHERE list_id = ?", [id]).map((row) => String(row.id));
+    const now = Date.now();
+    this.transaction(() => {
+      for (const taskId of taskIds) {
+        this.run("INSERT OR REPLACE INTO board_task_tombstones (id, deleted_at) VALUES (?, ?)", [taskId, now]);
+      }
+      this.run("DELETE FROM team_board_tasks WHERE list_id = ?", [id]);
+      this.run("INSERT OR REPLACE INTO board_list_tombstones (id, deleted_at) VALUES (?, ?)", [id, now]);
+      this.run("DELETE FROM team_board_lists WHERE id = ?", [id]);
+    });
+    return this.board();
+  }
+
+  createBoardTask(input: TeamBoardTaskInput): TeamBoard {
+    const actor = this.currentUser();
+    if (this.count("SELECT COUNT(*) AS count FROM team_board_tasks") >= BOARD_TASK_LIMIT) {
+      throw new Error(`The billboard is limited to ${BOARD_TASK_LIMIT} tasks.`);
+    }
+    const listId = typeof input?.listId === "string" ? input.listId.trim() : "";
+    if (!this.one("SELECT id FROM team_board_lists WHERE id = ?", [listId])) {
+      throw new Error("Choose an existing board list.");
+    }
+    const title = normalizeBoardTaskTitle(input?.title);
+    const detail = normalizeBoardTaskDetail(input?.detail);
+    const now = Date.now();
+    this.transaction(() => {
+      this.run(
+        "INSERT INTO team_board_tasks (id, list_id, title, detail, pinned, author_username, author_name, author_role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+          uid(),
+          listId,
+          title,
+          detail ?? null,
+          input?.pinned === true ? 1 : 0,
+          actor.username,
+          actor.displayName,
+          actor.role,
+          now,
+          now,
+        ],
+      );
+    });
+    return this.board();
+  }
+
+  updateBoardTask(id: string, patch: TeamBoardTaskPatch): TeamBoard {
+    this.currentUser();
+    const task = this.one("SELECT * FROM team_board_tasks WHERE id = ?", [id]);
+    if (!task) throw new Error("Board task not found.");
+    const nextListId = patch?.listId === undefined ? String(task.list_id) : patch.listId.trim();
+    if (!this.one("SELECT id FROM team_board_lists WHERE id = ?", [nextListId])) {
+      throw new Error("Choose an existing board list.");
+    }
+    const title = patch?.title === undefined ? String(task.title) : normalizeBoardTaskTitle(patch.title);
+    const detail =
+      patch?.detail === undefined ? (task.detail === null ? undefined : String(task.detail)) : normalizeBoardTaskDetail(patch.detail);
+    const pinned = patch?.pinned === undefined ? Boolean(task.pinned) : patch.pinned === true;
+    this.transaction(() => {
+      this.run("UPDATE team_board_tasks SET list_id = ?, title = ?, detail = ?, pinned = ?, updated_at = ? WHERE id = ?", [
+        nextListId,
+        title,
+        detail ?? null,
+        pinned ? 1 : 0,
+        Date.now(),
+        id,
+      ]);
+    });
+    return this.board();
+  }
+
+  deleteBoardTask(id: string): TeamBoard {
+    const actor = this.currentUser();
+    const task = this.one("SELECT * FROM team_board_tasks WHERE id = ?", [id]);
+    if (!task) throw new Error("Board task not found.");
+    if (actor.role === "user" && String(task.author_username) !== actor.username) {
+      throw new Error("Only the task author, an admin or a moderator can delete this task.");
+    }
+    this.transaction(() => {
+      this.run("INSERT OR REPLACE INTO board_task_tombstones (id, deleted_at) VALUES (?, ?)", [id, Date.now()]);
+      this.run("DELETE FROM team_board_tasks WHERE id = ?", [id]);
+    });
+    return this.board();
   }
 
   syncMachines(hosts: SshHostSummary[]): void {
@@ -709,14 +1155,24 @@ export class TeamService {
         if (remote) {
           const remoteId = String(remote.id);
           this.run("UPDATE machine_links SET machine_id = ? WHERE machine_id = ?", [host.id, remoteId]);
+          // Keep the synced link revision so a later snapshot cannot mistake
+          // this machine's carried-over grants for an older local edit.
+          this.run("UPDATE machines SET links_updated_at = ? WHERE id = ?", [
+            Number(remote.links_updated_at) || 0,
+            host.id,
+          ]);
           this.run("DELETE FROM machines WHERE id = ?", [remoteId]);
           existing = this.one("SELECT * FROM machines WHERE id = ?", [host.id]);
         }
       }
       if (!existing) {
+        // A freshly discovered endpoint has never had its grants edited on
+        // this computer, so it starts at revision 0. Using the insert time
+        // here would make grants pulled from another computer look stale and
+        // they would never be applied.
         this.run(
-          "INSERT INTO machines (id, label, host, port, username, color, updated_at, source, links_updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'local', ?)",
-          [host.id, host.label, host.host, host.port, host.username, host.color, now, now],
+          "INSERT INTO machines (id, label, host, port, username, color, updated_at, source, links_updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'local', 0)",
+          [host.id, host.label, host.host, host.port, host.username, host.color, now],
         );
         changed = true;
         continue;
@@ -750,7 +1206,72 @@ export class TeamService {
     return this.count("SELECT COUNT(*) AS count FROM machine_links WHERE user_id = ? AND machine_id = ?", [userId, machineId]) > 0;
   }
 
+  /**
+   * Whether a member may still use an SSH key issued for a machine. Elevated
+   * roles have implicit access, but every role loses keys for machines that
+   * have left the team inventory.
+   */
+  canUseSshKey(userId: string, machineId?: string): boolean {
+    const user = this.userRow(userId);
+    if (!user || String(user.status) !== "active") return false;
+    if (machineId && !this.one("SELECT id FROM machines WHERE id = ?", [machineId])) return false;
+    if (String(user.role) !== "user") return true;
+    if (machineId) {
+      return this.count("SELECT COUNT(*) AS count FROM machine_links WHERE user_id = ? AND machine_id = ?", [userId, machineId]) > 0;
+    }
+    return this.count("SELECT COUNT(*) AS count FROM machine_links WHERE user_id = ?", [userId]) > 0;
+  }
+
   /* ------------------------------------------------------------- internals */
+
+  private chatMessageFromRow(row: Row): TeamChatMessage {
+    return {
+      id: String(row.id),
+      authorUsername: String(row.author_username),
+      authorName: String(row.author_name),
+      authorRole: normalizeRole(String(row.author_role)),
+      body: String(row.body),
+      createdAt: Number(row.created_at),
+    };
+  }
+
+  private boardListFromRow(row: Row): TeamBoardList {
+    return {
+      id: String(row.id),
+      title: String(row.title),
+      position: Number(row.position),
+      createdByUsername: row.created_by_username === null ? undefined : String(row.created_by_username),
+      createdAt: Number(row.created_at),
+      updatedAt: Number(row.updated_at),
+    };
+  }
+
+  private boardTaskFromRow(row: Row): TeamBoardTask {
+    return {
+      id: String(row.id),
+      listId: String(row.list_id),
+      title: String(row.title),
+      detail: row.detail === null ? undefined : String(row.detail),
+      pinned: Boolean(row.pinned),
+      authorUsername: String(row.author_username),
+      authorName: String(row.author_name),
+      authorRole: normalizeRole(String(row.author_role)),
+      createdAt: Number(row.created_at),
+      updatedAt: Number(row.updated_at),
+    };
+  }
+
+  private listBoardLists(): TeamBoardList[] {
+    return this.all("SELECT * FROM team_board_lists ORDER BY position ASC, created_at ASC").map((row) =>
+      this.boardListFromRow(row),
+    );
+  }
+
+  private listBoardTasks(): TeamBoardTask[] {
+    return this.all("SELECT * FROM team_board_tasks ORDER BY pinned DESC, created_at ASC").map((row) =>
+      this.boardTaskFromRow(row),
+    );
+  }
 
   private userRow(id: string): Row | null {
     return this.one("SELECT * FROM users WHERE id = ?", [id]);
@@ -966,6 +1487,50 @@ export class TeamService {
       "SELECT key, deleted_at FROM sync_machine_tombstones ORDER BY deleted_at DESC",
     ).map((row) => ({ key: String(row.key), deletedAt: Number(row.deleted_at) }));
 
+    const chat: TeamSyncChatMessage[] = this.all(
+      "SELECT * FROM team_chat_messages ORDER BY created_at DESC LIMIT ?",
+      [CHAT_SYNC_LIMIT],
+    )
+      .reverse()
+      .map((row) => ({
+        id: String(row.id),
+        authorUsername: String(row.author_username),
+        authorName: String(row.author_name),
+        authorRole: normalizeRole(String(row.author_role)),
+        body: String(row.body),
+        createdAt: Number(row.created_at),
+      }));
+    const boardLists: TeamSyncBoardList[] = this.all(
+      "SELECT * FROM team_board_lists ORDER BY position ASC, created_at ASC",
+    ).map((row) => ({
+      id: String(row.id),
+      title: String(row.title),
+      position: Number(row.position),
+      createdByUsername: row.created_by_username === null ? undefined : String(row.created_by_username),
+      createdAt: Number(row.created_at),
+      updatedAt: Number(row.updated_at),
+    }));
+    const boardTasks: TeamSyncBoardTask[] = this.all(
+      "SELECT * FROM team_board_tasks ORDER BY created_at ASC",
+    ).map((row) => ({
+      id: String(row.id),
+      listId: String(row.list_id),
+      title: String(row.title),
+      detail: row.detail === null ? undefined : String(row.detail),
+      pinned: Boolean(row.pinned),
+      authorUsername: String(row.author_username),
+      authorName: String(row.author_name),
+      authorRole: normalizeRole(String(row.author_role)),
+      createdAt: Number(row.created_at),
+      updatedAt: Number(row.updated_at),
+    }));
+    const boardListTombstones: TeamSyncBoardTombstone[] = this.all(
+      "SELECT id, deleted_at FROM board_list_tombstones ORDER BY deleted_at DESC",
+    ).map((row) => ({ id: String(row.id), deletedAt: Number(row.deleted_at) }));
+    const boardTaskTombstones: TeamSyncBoardTombstone[] = this.all(
+      "SELECT id, deleted_at FROM board_task_tombstones ORDER BY deleted_at DESC",
+    ).map((row) => ({ id: String(row.id), deletedAt: Number(row.deleted_at) }));
+
     return {
       version: 1,
       workspaceName: String(this.one("SELECT value FROM settings WHERE key = 'workspace_name'")?.value ?? "Nexus Operations"),
@@ -977,6 +1542,11 @@ export class TeamService {
       activity,
       userTombstones,
       machineTombstones,
+      chat,
+      boardLists,
+      boardTasks,
+      boardListTombstones,
+      boardTaskTombstones,
     };
   }
 
@@ -1130,6 +1700,98 @@ export class TeamService {
         }
       }
 
+      const boardListTombstones = new Map<string, number>();
+      for (const tombstone of remote.boardListTombstones ?? []) {
+        if (!tombstone?.id) continue;
+        boardListTombstones.set(tombstone.id, Number(tombstone.deletedAt) || 0);
+        this.run("INSERT OR REPLACE INTO board_list_tombstones (id, deleted_at) VALUES (?, ?)", [
+          tombstone.id,
+          Number(tombstone.deletedAt) || 0,
+        ]);
+      }
+      for (const id of boardListTombstones.keys()) {
+        this.run("DELETE FROM team_board_tasks WHERE list_id = ?", [id]);
+        this.run("DELETE FROM team_board_lists WHERE id = ?", [id]);
+      }
+
+      const boardTaskTombstones = new Map<string, number>();
+      for (const tombstone of remote.boardTaskTombstones ?? []) {
+        if (!tombstone?.id) continue;
+        boardTaskTombstones.set(tombstone.id, Number(tombstone.deletedAt) || 0);
+        this.run("INSERT OR REPLACE INTO board_task_tombstones (id, deleted_at) VALUES (?, ?)", [
+          tombstone.id,
+          Number(tombstone.deletedAt) || 0,
+        ]);
+      }
+      for (const id of boardTaskTombstones.keys()) {
+        this.run("DELETE FROM team_board_tasks WHERE id = ?", [id]);
+      }
+
+      for (const list of remote.boardLists ?? []) {
+        if (!list?.id || boardListTombstones.has(list.id)) continue;
+        const existing = this.one("SELECT updated_at FROM team_board_lists WHERE id = ?", [list.id]);
+        if (existing && Number(existing.updated_at) > Number(list.updatedAt)) continue;
+        this.run(
+          `INSERT INTO team_board_lists (id, title, position, created_by_username, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET title = excluded.title, position = excluded.position,
+             created_by_username = excluded.created_by_username, updated_at = excluded.updated_at`,
+          [
+            list.id,
+            normalizeBoardListTitle(list.title),
+            Number(list.position) || 0,
+            list.createdByUsername ?? null,
+            Number(list.createdAt) || Date.now(),
+            Number(list.updatedAt) || Date.now(),
+          ],
+        );
+      }
+
+      for (const task of remote.boardTasks ?? []) {
+        if (!task?.id || boardTaskTombstones.has(task.id) || !task.listId) continue;
+        if (!this.one("SELECT id FROM team_board_lists WHERE id = ?", [task.listId])) continue;
+        const existing = this.one("SELECT updated_at FROM team_board_tasks WHERE id = ?", [task.id]);
+        if (existing && Number(existing.updated_at) > Number(task.updatedAt)) continue;
+        this.run(
+          `INSERT INTO team_board_tasks
+             (id, list_id, title, detail, pinned, author_username, author_name, author_role, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET list_id = excluded.list_id, title = excluded.title,
+             detail = excluded.detail, pinned = excluded.pinned, updated_at = excluded.updated_at`,
+          [
+            task.id,
+            task.listId,
+            normalizeBoardTaskTitle(task.title),
+            normalizeBoardTaskDetail(task.detail) ?? null,
+            task.pinned ? 1 : 0,
+            task.authorUsername || "synced-member",
+            task.authorName || task.authorUsername || "Synced member",
+            normalizeRole(task.authorRole || "user"),
+            Number(task.createdAt) || Date.now(),
+            Number(task.updatedAt) || Date.now(),
+          ],
+        );
+      }
+
+      for (const message of remote.chat ?? []) {
+        if (!message?.id) continue;
+        this.run(
+          "INSERT OR IGNORE INTO team_chat_messages (id, author_id, author_username, author_name, author_role, body, created_at) VALUES (?, NULL, ?, ?, ?, ?, ?)",
+          [
+            message.id,
+            message.authorUsername || "synced-member",
+            message.authorName || message.authorUsername || "Synced member",
+            normalizeRole(message.authorRole || "user"),
+            normalizeChatBody(message.body),
+            Number(message.createdAt) || Date.now(),
+          ],
+        );
+      }
+      this.run(
+        "DELETE FROM team_chat_messages WHERE id NOT IN (SELECT id FROM team_chat_messages ORDER BY created_at DESC LIMIT ?)",
+        [CHAT_STORE_LIMIT],
+      );
+
       for (const entry of remote.activity ?? []) {
         if (!entry?.id) continue;
         this.run(
@@ -1150,10 +1812,16 @@ export class TeamService {
 
       if (revokedCurrentSession) this.clearSession();
     });
+    // A snapshot from an older client cannot represent the super-admin role.
+    // Repair the invariant locally instead of leaving the workspace unable to
+    // appoint a super admin.
+    this.ensureSuperAdminPresent();
   }
 
   private listUsers(actor: TeamUser): TeamUser[] {
-    const rows = this.all("SELECT id FROM users ORDER BY CASE role WHEN 'admin' THEN 0 WHEN 'moderator' THEN 1 ELSE 2 END, display_name COLLATE NOCASE");
+    const rows = this.all(
+      "SELECT id FROM users ORDER BY CASE role WHEN 'superadmin' THEN 0 WHEN 'admin' THEN 1 WHEN 'moderator' THEN 2 ELSE 3 END, display_name COLLATE NOCASE",
+    );
     const users = rows.map((row) => this.toTeamUser(String(row.id))).filter((user): user is TeamUser => Boolean(user));
     return actor.role === "user" ? users.filter((user) => user.id === actor.id) : users;
   }
@@ -1210,7 +1878,7 @@ export class TeamService {
   }
 
   private permissions(actor: TeamUser): TeamPermissions {
-    const admin = actor.role === "admin";
+    const admin = actor.role === "admin" || actor.role === "superadmin";
     const manager = admin || actor.role === "moderator";
     return {
       manageUsers: manager,

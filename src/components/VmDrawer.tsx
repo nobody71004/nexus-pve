@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import type { BackupArchive, VmAction, VmDetail, VmSummary } from "../../shared/types";
 import { bridge } from "../lib/bridge";
 import { bytes, clock, cx, duration, pct } from "../lib/format";
@@ -50,7 +51,7 @@ export function VmDrawer({
   const backups = archives.filter((archive) => archive.vmid === vm.vmid);
   const running = vm.status === "running";
 
-  return (
+  return createPortal(
     <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <aside className="drawer" role="dialog" aria-label={`${vm.name} details`}>
         <header className="drawer-head">
@@ -272,6 +273,7 @@ export function VmDrawer({
           </section>
         </div>
       </aside>
-    </div>
+    </div>,
+    document.body,
   );
 }

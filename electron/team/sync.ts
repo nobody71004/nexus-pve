@@ -55,6 +55,7 @@ export class TeamSyncService {
     private readonly team: TeamService,
     private readonly onChange: (status: TeamSyncStatus) => void,
     file = configPath(),
+    private readonly afterApply?: () => unknown,
   ) {
     this.file = file;
     this.config = this.load();
@@ -83,6 +84,11 @@ export class TeamSyncService {
       error: this.error,
       counts,
     };
+  }
+
+  /** Internal-only connection details for the same self-hosted relay. */
+  fileShareTarget(): { endpoint: string; token: string } | null {
+    return this.config ? { endpoint: this.config.endpoint, token: this.config.token } : null;
   }
 
   async configure(input: TeamSyncConfigInput): Promise<TeamSyncRunResult> {
@@ -180,6 +186,7 @@ export class TeamSyncService {
       // relay or publish a real local/remote change.
       if (remote.snapshot && snapshotsEqual(merged, remote.snapshot)) {
         this.team.applySyncSnapshot(merged);
+        await this.afterApply?.();
         const remoteCounts = snapshotCounts(remote.snapshot);
         return {
           revision: remote.revision,
@@ -209,6 +216,7 @@ export class TeamSyncService {
         revision = second.revision;
       }
       this.team.applySyncSnapshot(finalSnapshot);
+      await this.afterApply?.();
       const remoteCounts = remote.snapshot ? snapshotCounts(remote.snapshot) : { users: 0, machines: 0, activity: 0 };
       return {
         revision,

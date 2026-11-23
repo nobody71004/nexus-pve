@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { cx } from "../lib/format";
 import { Icon, type IconName } from "./Icon";
 
@@ -281,11 +282,19 @@ export function Modal({
       if (event.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
-    ref.current?.querySelector<HTMLElement>("input, select, textarea, button")?.focus();
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  return (
+  // Focus once, and never steal focus from a field while the modal is in use.
+  // Parent renders recreate inline onClose callbacks, so this must not depend on it.
+  useEffect(() => {
+    const field = ref.current?.querySelector<HTMLElement>(
+      "input:not([disabled]), select:not([disabled]), textarea:not([disabled])",
+    );
+    (field ?? ref.current?.querySelector<HTMLElement>("button:not([disabled])"))?.focus();
+  }, []);
+
+  return createPortal(
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <div className="modal" style={{ width }} role="dialog" aria-modal="true" aria-label={title} ref={ref}>
         <header>
@@ -300,7 +309,8 @@ export function Modal({
         <div className="modal-content">{children}</div>
         {footer ? <footer>{footer}</footer> : null}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

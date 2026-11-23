@@ -1,7 +1,7 @@
 {
   "name": "nexus-pve",
   "productName": "NexusPVE",
-  "version": "1.0.11",
+  "version": "1.0.23",
   "description": "Nexus PVE — multi-host Proxmox fleet console with backup studio and an approval-gated agent/MCP pipeline.",
   "private": true,
   "main": "dist-electron/main.cjs",
@@ -30,7 +30,10 @@
     "smoke:packaged": "node scripts/packaged-smoke.mjs",
     "smoke:sshkeys": "node scripts/sshkey-smoke.mjs",
     "verify:packaged": "npm run package:dir && npm run smoke:packaged",
-    "test": "node tests/run-edge-tests.mjs",
+    "test": "node tests/run-edge-tests.mjs && npm run test:team-access && npm run test:team-panel && npm run test:team-files",
+    "test:team-access": "node tests/run-team-access-tests.mjs",
+    "test:team-panel": "node tests/run-team-panel-tests.mjs",
+    "test:team-files": "node tests/run-team-files-tests.mjs",
     "preflight": "npm run typecheck && npm run build && npm test && npm run smoke && npm run smoke:gpu && npm run smoke:ui-scale && npm run smoke:hardware && npm run smoke:sshkeys && npm run smoke:agent-fabric",
     "ui:mock": "vite --port 5173",
     "preflight:local": "node scripts/local-preflight.mjs",
@@ -52,6 +55,7 @@
     "electron": "^45.2.3",
     "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
+    "jsdom": "^31.0.1",
     "typescript": "^5.7.3",
     "vite": "^6.4.6",
     "wait-on": "^8.0.2"

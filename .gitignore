@@ -12,3 +12,11 @@ artifacts/
 Thumbs.db
 .tmp-*
 build/icon-preview.png
+
+# Local diagnostic scripts and review captures; these contain machine-specific state.
+host-do.mjs
+host-ssh-probe.mjs
+host-try.mjs
+node-console.mjs
+pve-*.mjs
+screenshots/

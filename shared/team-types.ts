@@ -2,7 +2,8 @@
 // machine links and audit records live in the SQLite database owned by the
 // Electron main process; the renderer only ever receives sanitized views.
 
-export type TeamRole = "admin" | "moderator" | "user";
+/** Workspace role hierarchy: super admin > admin > moderator > member. */
+export type TeamRole = "superadmin" | "admin" | "moderator" | "user";
 export type TeamStatus = "active" | "suspended";
 
 export interface TeamUser {
@@ -102,4 +103,58 @@ export interface TeamUserPatch {
   role?: TeamRole;
   status?: TeamStatus;
   password?: string;
+}
+
+export interface TeamChatMessage {
+  id: string;
+  authorUsername: string;
+  authorName: string;
+  authorRole: TeamRole;
+  body: string;
+  createdAt: number;
+}
+
+export interface TeamChat {
+  messages: TeamChatMessage[];
+}
+
+export interface TeamBoardList {
+  id: string;
+  title: string;
+  position: number;
+  createdByUsername?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TeamBoardTask {
+  id: string;
+  listId: string;
+  title: string;
+  detail?: string;
+  pinned: boolean;
+  authorUsername: string;
+  authorName: string;
+  authorRole: TeamRole;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TeamBoard {
+  lists: TeamBoardList[];
+  tasks: TeamBoardTask[];
+}
+
+export interface TeamBoardTaskInput {
+  listId: string;
+  title: string;
+  detail?: string;
+  pinned?: boolean;
+}
+
+export interface TeamBoardTaskPatch {
+  listId?: string;
+  title?: string;
+  detail?: string;
+  pinned?: boolean;
 }

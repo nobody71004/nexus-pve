@@ -1,5 +1,41 @@
 import type { TeamActivityEntry, TeamRole, TeamStatus } from "./team-types";
 
+export interface TeamSyncChatMessage {
+  id: string;
+  authorUsername: string;
+  authorName: string;
+  authorRole: TeamRole;
+  body: string;
+  createdAt: number;
+}
+
+export interface TeamSyncBoardList {
+  id: string;
+  title: string;
+  position: number;
+  createdByUsername?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TeamSyncBoardTask {
+  id: string;
+  listId: string;
+  title: string;
+  detail?: string;
+  pinned: boolean;
+  authorUsername: string;
+  authorName: string;
+  authorRole: TeamRole;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TeamSyncBoardTombstone {
+  id: string;
+  deletedAt: number;
+}
+
 /**
  * Cross-device sync is deliberately a workspace snapshot protocol. The main
  * process merges the snapshot with the local SQLite directory, and the relay
@@ -54,6 +90,11 @@ export interface TeamSyncSnapshot {
   activity: TeamActivityEntry[];
   userTombstones: TeamSyncUserTombstone[];
   machineTombstones: TeamSyncMachineTombstone[];
+  chat: TeamSyncChatMessage[];
+  boardLists: TeamSyncBoardList[];
+  boardTasks: TeamSyncBoardTask[];
+  boardListTombstones: TeamSyncBoardTombstone[];
+  boardTaskTombstones: TeamSyncBoardTombstone[];
 }
 
 export interface TeamSyncRemoteState {

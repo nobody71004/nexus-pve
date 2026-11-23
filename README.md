@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="License: GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-2ea44f?style=flat-square" /></a>
   <img alt="Platform: Windows 10/11 x64" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0a84ff?style=flat-square" />
   <img alt="Edge runtime: Python 3.10+ and nftables" src="https://img.shields.io/badge/edge-Python%203.10%2B%20%2B%20nftables-7c5cff?style=flat-square" />
-  <img alt="Version 1.0.11" src="https://img.shields.io/badge/version-1.0.11-3ddc97?style=flat-square" />
+  <img alt="Version 1.0.23" src="https://img.shields.io/badge/version-1.0.23-3ddc97?style=flat-square" />
 </p>
 
 > **Documentation image:** the hero uses documentation addresses from the RFC 5737 ranges. It does not show a live edge address. The project ships with fictional demo data and no credentials, private keys, or real infrastructure addresses.
@@ -73,8 +73,8 @@ The result is a console for a small but real fleet: a Proxmox cluster, a few Lin
 
 | Area | Implementation |
 | --- | --- |
-| Product | Nexus PVE `1.0.11` |
-| Desktop shell | Electron 33, React 18, TypeScript, Vite |
+| Product | Nexus PVE `1.0.23` |
+| Desktop shell | Electron 45, React 18, TypeScript, Vite |
 | Desktop target | Windows 10/11 x64 portable executable |
 | Proxmox access | HTTPS API with token or password authentication, optional TLS verification |
 | Linux access | SSH keys or stored passwords; systemd, filesystem, service, and security inspection |
@@ -90,9 +90,20 @@ The result is a console for a small but real fleet: a Proxmox cluster, a few Lin
 
 ### Portable build
 
-Prebuilt portable artifacts are published on the repository's [Releases](../../releases) page. The latest build is [`v1.0.11`](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.11). The current source tree is `1.0.11`.
+Prebuilt portable artifacts are published on the repository's [Releases](../../releases) page. The latest build is [`v1.0.23`](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.23). The current source tree is `1.0.23`.
 
-The portable target is Windows 10/11 x64. It requires no installer and no system Node.js runtime. Verify the published download against the SHA-256 in the release notes; a local checkout that includes `NexusPVE-1.0.11-portable.exe` should match the published v1.0.11 hash.
+The portable target is Windows 10/11 x64. It requires no installer and no system Node.js runtime. Verify the published download against the SHA-256 in the release notes; a local checkout that includes `NexusPVE-1.0.23-portable.exe` should match the published v1.0.23 hash.
+
+### Release 1.0.23
+
+`1.0.23` adds the team collaboration workspace, shared files, member machine keys, and accessibility and performance fixes.
+
+- **Team workspace** — Team access now has a four-role hierarchy (super admin, admin, moderator, member), a migration that promotes the legacy owner to super admin without losing sessions or machine grants, and server-side role boundaries. Admins can manage members, machine grants and audit history; moderators are limited to standard members and granted machines. Team chat and a shared billboard keep operational notes and handoffs with the workspace.
+- **Shared files** — A self-hosted team library on the sync relay with streamed uploads and downloads. The app does not impose a file-size ceiling; disk capacity and the relay's `NEXUS_FILES_MAX_BYTES` quota are the limits. The setup card can save the relay installer directly to the server.
+- **Member machine keys** — Issue one Ed25519 key per member and machine, reveal the private half once for installation, rotate or revoke it, and automatically reconcile keys when a member loses access to that machine. Private key material stays in the encrypted local vault.
+- **Motion and display fixes** — The galaxy backdrop caps DPR and per-canvas backing pixels so high-DPI or scaled displays do not allocate two huge full-screen canvases. The backdrop now honors `prefers-reduced-motion` on boot, sign-in and the workspace, alongside the existing motion toggle.
+- **Verification** — Typecheck and the production build pass; `npm test` passes 4 edge tests, 5 team-access tests, 1 team-panel focus test and 1 team-files relay test. The packaged smoke test passes 13/13 checks with 84 MCP tools.
+- **Asset** — [`NexusPVE-1.0.23-portable.exe`](https://github.com/nobody71004/nexus-pve/releases/download/v1.0.23/NexusPVE-1.0.23-portable.exe) (117,593,776 bytes), SHA-256 `2b58b97ee832da79e853b460322ec400635f0eac9e22f3834b9cad7e9b564fe2`. It is unsigned.
 
 ### Release 1.0.11
 
@@ -182,7 +193,7 @@ npm run preflight
 npm run package
 ```
 
-Output: `release/NexusPVE-1.0.11-portable.exe`.
+Output: `release/NexusPVE-1.0.23-portable.exe`.
 
 For development:
 
@@ -218,7 +229,50 @@ The left navigation is intentionally short:
 | **Praetor egress** | PRAETOR/1 sealed egress rollout: per-host keys and client profiles, fleet status, install/update, key rotation, and Proxmox SSH coverage |
 | **Backup studio** | vzdump archives, coverage, manual backups, restore, archive deletion, cluster backup schedules |
 | **Agent pipelines** | Built-in and user-defined multi-step runs, streaming logs, retries, fan-out, approval gates |
+| **Shared files** | Self-hosted team library on the sync relay; streamed upload/download with no app-level file cap |
 | **Connections** | Proxmox endpoints, Linux/SSH hosts, authentication, TLS verification, MCP client setup |
+
+### Shared files
+
+**Shared files** is a team library for installers, archives, datasets and runbooks. It uses the same self-hosted relay as
+Team sync, so there is no cloud account, no third-party storage quota and no Nexus-side file-size ceiling. The main
+process streams the selected file straight to the relay and streams downloads straight to the save path; the whole file
+is never buffered in the renderer.
+
+The relay stores one `.blob` per file plus a small `index.json` under `NEXUS_FILES_DIR` (by default
+`<NEXUS_SYNC_DATA directory>/files`). Disk capacity, server bandwidth and the relay's TLS link are the practical limits.
+Set `NEXUS_FILES_MAX_BYTES` only when the server owner wants a quota. Files are stored unencrypted at rest, so use disk
+encryption and restrictive server permissions if the content is sensitive.
+
+#### Install the relay on a server
+
+Use Node.js 20 or newer. The same relay can serve team sync and shared files, and an existing relay only needs an upgrade
+to the current `scripts/team-sync-server.mjs` to expose the file endpoints.
+
+1. Copy `scripts/team-sync-server.mjs` to the server.
+2. Choose a workspace token of at least 16 characters. Every Nexus station that joins the team uses the same token.
+3. Point `NEXUS_SYNC_DATA` at a persistent directory. The default is `./.nexus-sync/state.json`.
+4. Set `TLS_CERT` and `TLS_KEY` whenever `HOST` is not loopback. The server refuses plaintext HTTP on a public bind.
+5. Run it under a service manager so it survives reboots.
+
+The **Shared files** setup card can save `scripts/team-sync-server.mjs` with **Save relay installer**, so the script can be
+copied to the server without a source checkout.
+
+```sh
+NEXUS_SYNC_TOKEN='replace-with-at-least-16-characters' \
+HOST=0.0.0.0 \
+PORT=8788 \
+TLS_CERT=/etc/nexus/fullchain.pem \
+TLS_KEY=/etc/nexus/privkey.pem \
+NEXUS_SYNC_DATA=/var/lib/nexus-sync/state.json \
+NEXUS_FILES_DIR=/var/lib/nexus-sync/files \
+node scripts/team-sync-server.mjs
+```
+
+In Nexus, open **Team access → Sync**, enter the relay URL (`https://sync.example.com`) and token, and connect. Then open
+**Shared files**. Active members on that relay see the same library. The uploader or an admin can remove an item; downloads
+and uploads are authenticated with the workspace token. Use a dedicated token for the workspace and rotate it if a device
+is lost.
 
 ### Command Deck
 
@@ -993,7 +1047,7 @@ If you discover a security issue, avoid posting live credentials, hostnames, or 
 - The UI is an operator console, not a multi-tenant control plane. Team roles and per-machine grants are enforced locally, but they are not an SSO provider or an enterprise identity boundary.
 - The embedded noVNC console requires a VNC daemon listening on the host's loopback interface. Nexus can install and start that terminal service automatically on SSH hosts (sway/wayvnc/foot, or TigerVNC/xterm), but never exposes it beyond loopback. Proxmox nodes must be present as SSH hosts for the installer; an API token alone cannot install packages.
 - A host whose SSH account is neither root nor able to use sudo needs a manual root-shell install first; the app can prompt for a sudo password but cannot create sudo rights.
-- The project is version `1.0.11`; review changes and test against a lab before relying on it for production recovery or attack response.
+- The project is version `1.0.23`; review changes and test against a lab before relying on it for production recovery or attack response.
 
 ---
 

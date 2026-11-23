@@ -219,7 +219,7 @@ try {
     "test profile was seeded",
     report.profile?.seeded === true &&
       report.profile?.username === "smoke-owner" &&
-      report.profile?.role === "admin",
+      report.profile?.role === "superadmin",
     report.profile ? `${report.profile.username}/${report.profile.role}` : "no profile report",
   );
   check(

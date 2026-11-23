@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
+import { BrowserWindow, app, dialog, ipcMain, shell, type OpenDialogOptions } from "electron";
 import { IPC } from "../shared/ipc";
 import type {
   AppSettings,
@@ -14,6 +14,8 @@ import type {
   SshHostInput,
   TeamBootstrapInput,
   TeamAuditFilter,
+  TeamBoardTaskInput,
+  TeamBoardTaskPatch,
   TeamLoginInput,
   TeamSyncConfigInput,
   TeamUserInput,
@@ -41,6 +43,8 @@ import { checkHelper, installHelper } from "./ssh/helper";
 import { setupGpuSensors } from "./ssh/gpu-setup";
 import { guardian } from "./security/guardian";
 import { sshKeys } from "./sshkeys/service";
+import { revokeUnauthorizedTeamKeys } from "./team/access-keys";
+import { TeamFilesService } from "./team/files";
 import { ddos } from "./ddos/service";
 import type { DdosConfig, DdosMode } from "../shared/ddos-types";
 import { relay } from "./relay/service";
@@ -83,6 +87,15 @@ function vmType(value: unknown): VmType {
 
 export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamSyncService): void {
   const { store, registry, pipelines } = runtime;
+  const teamFiles = new TeamFilesService(teamSync);
+  const revokeTeamKeys = async () => {
+    try {
+      team.syncMachines(listSshHosts(store));
+      await revokeUnauthorizedTeamKeys(team);
+    } catch (error) {
+      console.error("[nexus] could not reconcile member SSH keys", error);
+    }
+  };
   const requireOperator = () => {
     const user = team.currentUser();
     if (user.role === "user") throw new Error("Admin or moderator access required.");
@@ -148,18 +161,108 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
   ipcMain.handle(IPC.teamCreateUser, (_event, input: TeamUserInput) =>
     team.createUser(input ?? ({} as TeamUserInput)),
   );
-  ipcMain.handle(IPC.teamUpdateUser, (_event, id: unknown, patch: TeamUserPatch) =>
-    team.updateUser(str(id, "member id"), patch ?? ({} as TeamUserPatch)),
-  );
-  ipcMain.handle(IPC.teamDeleteUser, (_event, id: unknown) => team.deleteUser(str(id, "member id")));
-  ipcMain.handle(IPC.teamSetMachineLinks, (_event, machineId: unknown, userIds: unknown) => {
+  ipcMain.handle(IPC.teamUpdateUser, async (_event, id: unknown, patch: TeamUserPatch) => {
+    const overview = team.updateUser(str(id, "member id"), patch ?? ({} as TeamUserPatch));
+    await revokeTeamKeys();
+    return overview;
+  });
+  ipcMain.handle(IPC.teamDeleteUser, async (_event, id: unknown) => {
+    const overview = team.deleteUser(str(id, "member id"));
+    await revokeTeamKeys();
+    return overview;
+  });
+  ipcMain.handle(IPC.teamSetMachineLinks, async (_event, machineId: unknown, userIds: unknown) => {
     team.syncMachines(listSshHosts(store));
     const ids = Array.isArray(userIds) ? userIds.filter((id): id is string => typeof id === "string" && id.length > 0) : [];
-    return team.setMachineLinks(str(machineId, "machine id"), ids);
+    const overview = team.setMachineLinks(str(machineId, "machine id"), ids);
+    await revokeTeamKeys();
+    return overview;
+  });
+  ipcMain.handle(IPC.teamSetUserMachineLinks, async (_event, userId: unknown, machineIds: unknown) => {
+    team.syncMachines(listSshHosts(store));
+    const ids = Array.isArray(machineIds)
+      ? machineIds.filter((id): id is string => typeof id === "string" && id.length > 0)
+      : [];
+    const overview = team.setUserMachineLinks(str(userId, "member id"), ids);
+    await revokeTeamKeys();
+    return overview;
   });
   ipcMain.handle(IPC.teamAudit, (_event, filter: TeamAuditFilter | undefined) =>
     team.auditLog(filter ?? {}),
   );
+  ipcMain.handle(IPC.teamChat, () => team.chat());
+  ipcMain.handle(IPC.teamChatPost, (_event, body: unknown) => team.postChatMessage(str(body, "message")));
+  ipcMain.handle(IPC.teamBoard, () => team.board());
+  ipcMain.handle(IPC.teamBoardListCreate, (_event, title: unknown) => team.createBoardList(str(title, "list name")));
+  ipcMain.handle(IPC.teamBoardListDelete, (_event, id: unknown) => team.deleteBoardList(str(id, "list id")));
+  ipcMain.handle(IPC.teamBoardTaskCreate, (_event, input: TeamBoardTaskInput | undefined) =>
+    team.createBoardTask(input ?? ({} as TeamBoardTaskInput)),
+  );
+  ipcMain.handle(IPC.teamBoardTaskUpdate, (_event, id: unknown, patch: TeamBoardTaskPatch | undefined) =>
+    team.updateBoardTask(str(id, "task id"), patch ?? ({} as TeamBoardTaskPatch)),
+  );
+  ipcMain.handle(IPC.teamBoardTaskDelete, (_event, id: unknown) => team.deleteBoardTask(str(id, "task id")));
+
+  ipcMain.handle(IPC.teamFilesOverview, () => {
+    team.currentUser();
+    return teamFiles.overview();
+  });
+  ipcMain.handle(IPC.teamFilesUpload, async (event) => {
+    const actor = team.currentUser();
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const options: OpenDialogOptions = {
+      title: "Share a file with the team",
+      buttonLabel: "Share file",
+      properties: ["openFile"],
+    };
+    const picked = win && !win.isDestroyed()
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options);
+    if (picked.canceled || !picked.filePaths[0]) return null;
+    return teamFiles.upload(picked.filePaths[0], actor);
+  });
+  ipcMain.handle(IPC.teamFilesDownload, async (event, id: unknown, name: unknown) => {
+    team.currentUser();
+    const fileId = str(id, "file id");
+    const safeName =
+      (typeof name === "string"
+        ? path.basename(name).replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/, "")
+        : "") || "nexus-file";
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const options = {
+      title: "Save the shared file",
+      defaultPath: path.join(app.getPath("downloads"), safeName),
+    };
+    const picked = win && !win.isDestroyed()
+      ? await dialog.showSaveDialog(win, options)
+      : await dialog.showSaveDialog(options);
+    if (picked.canceled || !picked.filePath) return null;
+    await teamFiles.download(fileId, picked.filePath);
+    return picked.filePath;
+  });
+  ipcMain.handle(IPC.teamFilesServerScript, async (event) => {
+    team.currentUser();
+    const source = path.join(app.getAppPath(), "scripts", "team-sync-server.mjs");
+    if (!fs.existsSync(source)) throw new Error("The bundled team relay script is missing from this build.");
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const options = {
+      title: "Save the team relay installer",
+      defaultPath: path.join(app.getPath("downloads"), "team-sync-server.mjs"),
+      filters: [{ name: "Node.js server", extensions: ["mjs"] }],
+    };
+    const picked = win && !win.isDestroyed()
+      ? await dialog.showSaveDialog(win, options)
+      : await dialog.showSaveDialog(options);
+    if (picked.canceled || !picked.filePath) return null;
+    // readFile/writeFile are asar-aware; copyFileSync is not supported for archive entries.
+    fs.writeFileSync(picked.filePath, fs.readFileSync(source));
+    return picked.filePath;
+  });
+  ipcMain.handle(IPC.teamFilesRemove, (_event, id: unknown) => {
+    const actor = team.currentUser();
+    return teamFiles.remove(str(id, "file id"), actor);
+  });
+
   ipcMain.handle(IPC.teamAuditExport, async (event, filter: TeamAuditFilter | undefined) => {
     const audit = team.auditCsv(filter ?? {});
     const stamp = new Date().toISOString().slice(0, 10);
@@ -179,8 +282,8 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
 
   const allowSyncManagement = () => {
     const state = team.status();
-    if (state.initialized && state.user?.role !== "admin") {
-      throw new Error("Only an active admin can change cross-device sync.");
+    if (state.initialized && state.user?.role !== "admin" && state.user?.role !== "superadmin") {
+      throw new Error("Only an active admin or super admin can change cross-device sync.");
     }
     return state;
   };
@@ -237,11 +340,12 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
     void user;
     return saved;
   });
-  ipcMain.handle(IPC.sshHostsRemove, (_event, id: unknown) => {
+  ipcMain.handle(IPC.sshHostsRemove, async (_event, id: unknown) => {
     const user = requireOperator();
     const hostId = str(id, "host id");
     removeSshHost(store, hostId);
     team.removeMachine(hostId, user);
+    await revokeTeamKeys();
   });
   ipcMain.handle(IPC.sshHostsTest, (_event, input: SshHostInput) => {
     requireOperator();
@@ -309,6 +413,36 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
   ipcMain.handle(IPC.sshKeysGenerate, (_event, input: unknown) => {
     requireOperator();
     return sshKeys.generate((input ?? {}) as { label?: unknown; owner?: unknown });
+  });
+  ipcMain.handle(IPC.sshKeysMine, () => {
+    const actor = team.currentUser();
+    return sshKeys.issuedTo(actor.id);
+  });
+  ipcMain.handle(IPC.sshKeysIssue, (_event, input: unknown) => {
+    const actor = team.currentUser();
+    const raw = (input ?? {}) as Record<string, unknown>;
+    const hostId = str(raw.hostId, "machine id");
+    const requested = typeof raw.userId === "string" && raw.userId.trim() ? raw.userId.trim() : actor.id;
+    if (actor.role === "user" && requested !== actor.id) {
+      throw new Error("You can only create your own SSH key.");
+    }
+    const directory = team.overview();
+    const target = directory.users.find((user) => user.id === requested) ?? (requested === actor.id ? actor : null);
+    if (!target) throw new Error("Member not found.");
+    if (actor.role === "moderator" && target.role !== "user") {
+      throw new Error("Moderators can only issue keys to standard members.");
+    }
+    if (target.role === "user" && !team.canAccessMachine(target.id, hostId)) {
+      throw new Error("That machine is not linked to this member. Grant machine access first.");
+    }
+    return sshKeys.issue(
+      {
+        hostId,
+        label: typeof raw.label === "string" && raw.label.trim() ? raw.label.trim() : undefined,
+        rotate: raw.rotate === true,
+      },
+      { id: target.id, username: target.username, displayName: target.displayName },
+    );
   });
   ipcMain.handle(IPC.sshKeysDeploy, (_event, hostId: unknown, keyId: unknown) => {
     requireOperator();

@@ -146,6 +146,17 @@ const paths: Record<string, ReactNode> = {
       <path d="M4 20h16" />
     </>
   ),
+  upload: (
+    <>
+      <path d="M12 20V8M7 13l5-5 5 5" />
+      <path d="M4 4h16" />
+    </>
+  ),
+  folder: (
+    <>
+      <path d="M3 7a2 2 0 012-2h5l2 2h7a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+    </>
+  ),
   clock: (
     <>
       <circle cx="12" cy="12" r="9" />
@@ -178,6 +189,30 @@ const paths: Record<string, ReactNode> = {
       <path d="M14 4h6v6" />
       <path d="M20 4l-9 9" />
       <path d="M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5" />
+    </>
+  ),
+  chat: (
+    <>
+      <path d="M21 11.5a8.5 8.5 0 01-9 8.5 9.6 9.6 0 01-4-.9L3 21l1.5-4.2A8.2 8.2 0 013 11.5 8.5 8.5 0 0112 3a8.5 8.5 0 019 8.5z" />
+      <path d="M8 11h.01M12 11h.01M16 11h.01" />
+    </>
+  ),
+  pin: (
+    <>
+      <path d="M9 3h6l-1 5 4 4v2H6v-2l4-4-1-5z" />
+      <path d="M12 14v7" />
+    </>
+  ),
+  clipboard: (
+    <>
+      <rect x="5" y="4" width="14" height="17" rx="2" />
+      <path d="M9 4V2h6v2M8 9h8M8 13h8M8 17h5" />
+    </>
+  ),
+  edit: (
+    <>
+      <path d="M4 20h4l10.5-10.5a2.1 2.1 0 00-3-3L5 17v3z" />
+      <path d="M13.5 5.5l3 3" />
     </>
   ),
 };

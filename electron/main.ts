@@ -7,6 +7,9 @@ import { registerIpc } from "./ipc";
 import { createRuntime, mcpServerPath, type Runtime } from "./agent/runtime";
 import { TeamService } from "./team/store";
 import { TeamSyncService } from "./team/sync";
+import { revokeUnauthorizedTeamKeys } from "./team/access-keys";
+import { sshKeys } from "./sshkeys/service";
+import { listSshHosts } from "./ssh/collect";
 import { UI_SCALE_DEFAULT } from "../shared/ui-scale";
 
 app.setName("NexusPVE");
@@ -216,7 +219,20 @@ app.whenReady().then(async () => {
     const runtime = createRuntime(appRoot, broadcast);
     appRuntime = runtime;
     team = await TeamService.open(appRoot);
-    teamSync = new TeamSyncService(team, (status) => broadcast({ type: "team-sync", teamSync: status }));
+    const teamService = team;
+    // Reconcile keys against this computer's current inventory, not a stale
+    // team machine list that has not seen a just-added host yet.
+    teamService.syncMachines(listSshHosts(runtime.store));
+    teamSync = new TeamSyncService(
+      teamService,
+      (status) => broadcast({ type: "team-sync", teamSync: status }),
+      undefined,
+      () => revokeUnauthorizedTeamKeys(teamService),
+    );
+    sshKeys.bindAccessReconciler(() => revokeUnauthorizedTeamKeys(teamService));
+    void revokeUnauthorizedTeamKeys(teamService).catch((error) => {
+      console.error("[nexus] could not reconcile member SSH keys", error);
+    });
     if (smokeReportPath) smokeProfile = await seedSmokeProfile(team);
     registerIpc(runtime, team, teamSync);
   } catch (error) {

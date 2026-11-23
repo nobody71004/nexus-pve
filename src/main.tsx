@@ -8,6 +8,7 @@ import "./praetor.css";
 import "./sshkeys-styles.css";
 import "./gpu-styles.css";
 import "./hardware-styles.css";
+import "./pointer-fx.css";
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

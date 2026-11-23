@@ -8,10 +8,12 @@ export function AuthScreen({
   initialized,
   onAuthenticated,
   onWorkspaceChanged,
+  reduced,
 }: {
   initialized: boolean;
   onAuthenticated: (user: TeamUser) => void;
   onWorkspaceChanged: () => void;
+  reduced: boolean;
 }) {
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -92,7 +94,7 @@ export function AuthScreen({
 
   return (
     <div className="app auth-app">
-      <Backdrop reduced={false} />
+      <Backdrop reduced={reduced} />
       <header className="auth-bar">
         <div className="brand">
           <span className="brand-mark live">
@@ -133,7 +135,7 @@ export function AuthScreen({
           <h1 id="auth-title">{setup ? "Create the workspace owner." : "Welcome back."}</h1>
           <p className="auth-lede">
             {setup
-              ? "Nexus needs one owner account before it can store members, roles and machine grants. This account lives only on this computer."
+              ? "Nexus needs one owner account before it can store members, roles and machine grants. The owner becomes the first Super admin."
               : "Sign in to the local Nexus workspace. Your role decides which machines and admin tools you can use."}
           </p>
 
@@ -277,7 +279,7 @@ export function AuthScreen({
             </span>
             <div>
               <strong>Accounts and roles</strong>
-              <p>Admin, moderator and member roles with server-side permission checks.</p>
+              <p>Super admin, admin, moderator and member roles with server-side permission checks.</p>
             </div>
           </div>
           <div className="auth-feature">
@@ -299,7 +301,7 @@ export function AuthScreen({
             </div>
           </div>
           <p className="auth-aside-note">
-            Local SQLite remains the source of truth on each station. An admin can opt into a self-hosted TLS sync
+            Local SQLite remains the source of truth on each station. A super admin or admin can opt into a self-hosted TLS sync
             relay so the same team can collaborate from another computer without sharing SSH secrets.
           </p>
         </aside>

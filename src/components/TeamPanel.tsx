@@ -1,27 +1,44 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import type { SshAuthMode, SshHostInput, SshHostSummary } from "../../shared/types";
 import type {
   TeamMachine,
   TeamOverview,
+  TeamPermissions,
   TeamRole,
   TeamStatus,
   TeamUser,
   TeamUserInput,
   TeamUserPatch,
 } from "../../shared/team-types";
-import type { TeamAuditFilter, TeamAuditResult, TeamSyncStatus } from "../../shared/types";
+import type {
+  ManagedSshKey,
+  SshKeyIssueResult,
+  TeamAuditFilter,
+  TeamAuditResult,
+  TeamSyncStatus,
+} from "../../shared/types";
 import { bridge } from "../lib/bridge";
+import { SshKeyReveal } from "./SshKeyReveal";
+import { TeamBillboard } from "./TeamBillboard";
+import { TeamChatView } from "./TeamChat";
 import { ago, cx, dateTime } from "../lib/format";
 import { Icon } from "./Icon";
 import { Chip, Modal, Panel, Skeleton, StatTile, type ToastItem } from "./ui";
 
-type TeamTab = "members" | "machines" | "activity" | "sync" | "profile";
+type TeamTab = "members" | "chat" | "board" | "machines" | "activity" | "sync" | "profile";
 type Toast = (level: ToastItem["level"], title: string, detail?: string) => void;
 
-const ROLE_LABEL: Record<TeamRole, string> = { admin: "Admin", moderator: "Mod", user: "Member" };
-const ROLE_TONE: Record<TeamRole, "info" | "violet" | "muted"> = {
-  admin: "violet",
-  moderator: "info",
+const ROLE_LABEL: Record<TeamRole, string> = {
+  superadmin: "Super admin",
+  admin: "Admin",
+  moderator: "Mod",
+  user: "Member",
+};
+const ROLE_TONE: Record<TeamRole, "info" | "violet" | "muted" | "ok"> = {
+  superadmin: "violet",
+  admin: "info",
+  moderator: "ok",
   user: "muted",
 };
 
@@ -74,6 +91,7 @@ export function TeamPanel({
   const [tab, setTab] = useState<TeamTab>(currentUser.role === "user" ? "machines" : "members");
   const [memberDialog, setMemberDialog] = useState<{ mode: "create" | "edit"; member?: TeamUser } | null>(null);
   const [adminMachine, setAdminMachine] = useState<TeamMachine | null>(null);
+  const [keyMachine, setKeyMachine] = useState<TeamMachine | null>(null);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [audit, setAudit] = useState<TeamAuditResult | null>(null);
@@ -113,15 +131,21 @@ export function TeamPanel({
     () =>
       isMember
         ? [
+            { id: "chat" as const, label: "Team chat" },
+            { id: "board" as const, label: "Billboard" },
             { id: "machines" as const, label: "My machines" },
             { id: "activity" as const, label: "My activity" },
             { id: "profile" as const, label: "Profile" },
           ]
         : [
             { id: "members" as const, label: "Members" },
+            { id: "chat" as const, label: "Team chat" },
+            { id: "board" as const, label: "Billboard" },
             { id: "machines" as const, label: "Machines" },
             { id: "activity" as const, label: "Activity" },
-            ...(currentUser.role === "admin" ? [{ id: "sync" as const, label: "Sync" }] : []),
+            ...(currentUser.role === "admin" || currentUser.role === "superadmin"
+              ? [{ id: "sync" as const, label: "Sync" }]
+              : []),
             { id: "profile" as const, label: "My profile" },
           ],
     [currentUser.role, isMember],
@@ -155,6 +179,7 @@ export function TeamPanel({
 
   const removeMember = async (member: TeamUser) => {
     if (!permissions?.deleteUsers || member.id === currentUser.id) return;
+    if (member.role === "superadmin" && currentUser.role !== "superadmin") return;
     if (!window.confirm(`Delete ${member.displayName} (@${member.username})? Their machine links and sessions are removed.`)) return;
     setBusy(true);
     try {
@@ -189,7 +214,10 @@ export function TeamPanel({
           </div>
         </div>
         <div className="team-summary-identity">
-          <span className="avatar large" style={{ background: currentUser.role === "admin" ? "#6d4dff" : undefined }}>
+          <span
+            className="avatar large"
+            style={{ background: currentUser.role === "admin" || currentUser.role === "superadmin" ? "#6d4dff" : undefined }}
+          >
             {initials(currentUser)}
           </span>
           <div>
@@ -270,6 +298,10 @@ export function TeamPanel({
             ) : null}
           </div>
 
+          {tab === "chat" ? <TeamChatView currentUser={currentUser} onToast={onToast} /> : null}
+
+          {tab === "board" ? <TeamBillboard currentUser={currentUser} onToast={onToast} /> : null}
+
           {tab === "members" && !isMember ? (
             <Panel
               eyebrow="DIRECTORY"
@@ -291,7 +323,15 @@ export function TeamPanel({
                   </thead>
                   <tbody>
                     {overview.users.map((member) => {
-                      const manageable = currentUser.role === "admin" || member.role === "user";
+                      const manageable =
+                        currentUser.role === "superadmin"
+                          ? true
+                          : currentUser.role === "admin"
+                            ? member.role !== "superadmin"
+                            : member.role === "user";
+                      const canDelete =
+                        member.id !== currentUser.id &&
+                        (currentUser.role === "superadmin" || member.role !== "superadmin");
                       return (
                         <tr key={member.id} className={cx(member.id === currentUser.id && "is-self")}>
                           <td>
@@ -335,7 +375,7 @@ export function TeamPanel({
                                   className="btn icon ghost danger"
                                   onClick={() => void removeMember(member)}
                                   title={`Delete ${member.displayName}`}
-                                  disabled={member.id === currentUser.id || busy}
+                                  disabled={!canDelete || busy}
                                 >
                                   <Icon name="trash" size={12} />
                                 </button>
@@ -348,12 +388,13 @@ export function TeamPanel({
                   </tbody>
                 </table>
               </div>
-              {currentUser.role === "moderator" ? (
-                <p className="team-table-note">
-                  Moderators can add and manage standard members, reset their passwords and grant machine access.
-                  Admin and moderator roles are controlled by an admin.
-                </p>
-              ) : null}
+              <p className="team-table-note">
+                {currentUser.role === "moderator"
+                  ? "Moderators can add and manage standard members, reset their passwords and grant machine access. Admin and moderator roles are controlled by an admin or super admin."
+                  : currentUser.role === "superadmin"
+                    ? "Super admins can manage every role, including other super admins. The workspace always keeps at least one active super admin."
+                    : "Admins can manage admins, moderators and members. Super admin accounts are managed by a super admin."}
+              </p>
             </Panel>
           ) : null}
 
@@ -451,9 +492,14 @@ export function TeamPanel({
                                   <Icon name="server" size={12} /> Administer
                                 </button>
                               ) : (
-                                <button className="btn small ghost" onClick={onOpenHosts}>
-                                  <Icon name="terminal" size={12} /> Use machine
-                                </button>
+                                <div className="inline-actions">
+                                  <button className="btn small ghost" onClick={() => setKeyMachine(machine)}>
+                                    <Icon name="key" size={12} /> SSH key
+                                  </button>
+                                  <button className="btn small ghost" onClick={onOpenHosts}>
+                                    <Icon name="terminal" size={12} /> Use machine
+                                  </button>
+                                </div>
                               )}
                             </div>
                           </td>
@@ -465,8 +511,8 @@ export function TeamPanel({
               )}
               {!isMember ? (
                 <p className="team-table-note">
-                  Admin and moderator accounts can see every machine. Standard members only see machines explicitly
-                  linked here; the same rule is enforced for SSH, VNC and host actions in the main process.
+                  Super admin, admin and moderator accounts can see every machine. Standard members only see machines
+                  explicitly linked here; the same rule is enforced for SSH, VNC and host actions in the main process.
                 </p>
               ) : null}
             </Panel>
@@ -714,12 +760,22 @@ export function TeamPanel({
                 ) : (
                   <div className="role-capabilities">
                     <div>
+                      <strong>Super admin</strong>
+                      <p>
+                        Top-level workspace control: manages every role, including admins and other super admins. At
+                        least one active super admin is always required.
+                      </p>
+                    </div>
+                    <div>
                       <strong>Admin</strong>
-                      <p>Full workspace control: accounts, roles, machine grants, inventory and every operational panel.</p>
+                      <p>
+                        Workspace control: accounts, admin and moderator roles, machine grants, inventory and every
+                        operational panel. Only a super admin can alter super admin accounts.
+                      </p>
                     </div>
                     <div>
                       <strong>Moderator</strong>
-                      <p>Operational access plus standard-member management and machine grants. Cannot alter admins or other moderators.</p>
+                      <p>Operational access plus standard-member management and machine grants. Cannot alter elevated roles.</p>
                     </div>
                     <div>
                       <strong>Member</strong>
@@ -738,6 +794,8 @@ export function TeamPanel({
           key={`${memberDialog.mode}-${memberDialog.member?.id ?? "new"}`}
           mode={memberDialog.mode}
           member={memberDialog.member}
+          machines={overview?.machines ?? []}
+          permissions={permissions}
           currentUser={currentUser}
           onClose={() => setMemberDialog(null)}
           onSaved={(next) => {
@@ -763,14 +821,143 @@ export function TeamPanel({
         />
       ) : null}
 
+      {keyMachine ? (
+        <MachineKeyDialog machine={keyMachine} onClose={() => setKeyMachine(null)} onToast={onToast} />
+      ) : null}
+
       {passwordOpen ? <PasswordDialog onClose={() => setPasswordOpen(false)} onToast={onToast} /> : null}
     </div>
+  );
+}
+
+/**
+ * Member-facing machine key: create once, reveal the private half exactly
+ * once, then rotate (which removes the previous key from the machine).
+ */
+function MachineKeyDialog({
+  machine,
+  onClose,
+  onToast,
+}: {
+  machine: TeamMachine;
+  onClose: () => void;
+  onToast: Toast;
+}) {
+  const [keys, setKeys] = useState<ManagedSshKey[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<SshKeyIssueResult | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void bridge.sshkeys
+      .mine()
+      .then((list) => {
+        if (live) setKeys(list.filter((key) => key.issuedHostId === machine.id));
+      })
+      .catch((err) => {
+        if (live) setError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      live = false;
+    };
+  }, [machine.id]);
+
+  const create = async (rotate: boolean) => {
+    if (rotate && !window.confirm(`Rotate your key for ${machine.label}? The old key is removed from the machine.`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const issued = await bridge.sshkeys.issue({ hostId: machine.id, rotate });
+      setResult(issued);
+      setKeys((current) => [issued.key, ...(current ?? []).filter((key) => key.issuedHostId !== machine.id)]);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      onToast("error", "SSH key failed", message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (result) {
+    return <SshKeyReveal result={result} onClose={() => setResult(null)} onToast={onToast} />;
+  }
+
+  const active = keys?.find((key) => key.status === "active");
+  const remote = machine.source === "remote";
+
+  return (
+    <Modal
+      title={`SSH access to ${machine.label}`}
+      subtitle={`${machine.username}@${machine.host}:${machine.port}`}
+      onClose={onClose}
+      width={560}
+      footer={
+        <>
+          <button className="btn ghost" onClick={onClose} disabled={busy}>
+            Close
+          </button>
+          {active && !remote ? (
+            <button className="btn ghost" onClick={() => void create(true)} disabled={busy}>
+              <Icon name="refresh" size={13} /> {busy ? "Rotating…" : "Rotate key"}
+            </button>
+          ) : null}
+          {!active && !remote ? (
+            <button className="btn primary" onClick={() => void create(false)} disabled={busy || keys === null}>
+              <Icon name="key" size={13} /> {busy ? "Creating…" : "Create my SSH key"}
+            </button>
+          ) : null}
+        </>
+      }
+    >
+      <div className="machine-key">
+        {remote ? (
+          <div className="machine-key-note">
+            This machine is registered from another computer. Add the same SSH endpoint in this computer's inventory
+            before issuing a key here.
+          </div>
+        ) : (
+          <p className="hint">
+            This creates a personal Ed25519 key for your account, adds only the public half to the machine, and shows
+            the private half once. Use it with any SSH client — no shared password and no admin key.
+          </p>
+        )}
+
+        {error ? <p className="form-error">{error}</p> : null}
+        {keys === null && !error ? <Skeleton height={74} /> : null}
+        {active ? (
+          <div className="machine-key-active">
+            <span className="machine-key-mark">
+              <Icon name="check" size={14} />
+            </span>
+            <div>
+              <strong>Your key is active</strong>
+              <span className="mono">{active.fingerprint}</span>
+              <span className="subtle small">
+                {active.label} · created {ago(active.createdAt)} · {active.hosts.length ? "deployed" : "pending"}
+              </span>
+            </div>
+          </div>
+        ) : keys !== null && !remote ? (
+          <div className="machine-key-empty">
+            <Icon name="key" size={18} />
+            <span>No personal key for this machine yet.</span>
+          </div>
+        ) : null}
+        {active ? (
+          <p className="hint">The private key is only shown when it is created. If you lose it, rotate to get a fresh one.</p>
+        ) : null}
+      </div>
+    </Modal>
   );
 }
 
 function MemberDialog({
   mode,
   member,
+  machines,
+  permissions,
   currentUser,
   onClose,
   onSaved,
@@ -778,21 +965,44 @@ function MemberDialog({
 }: {
   mode: "create" | "edit";
   member?: TeamUser;
+  machines: TeamMachine[];
+  permissions?: TeamPermissions;
   currentUser: TeamUser;
   onClose: () => void;
   onSaved: (overview: TeamOverview) => void;
   onToast: Toast;
 }) {
-  const roleOptions: TeamRole[] = currentUser.role === "admin" ? ["admin", "moderator", "user"] : ["user"];
+  const roleOptions: TeamRole[] =
+    currentUser.role === "superadmin"
+      ? ["superadmin", "admin", "moderator", "user"]
+      : currentUser.role === "admin"
+        ? ["admin", "moderator", "user"]
+        : ["user"];
   const [username, setUsername] = useState(member?.username ?? "");
   const [displayName, setDisplayName] = useState(member?.displayName ?? "");
   const [role, setRole] = useState<TeamRole>(member?.role ?? "user");
   const [status, setStatus] = useState<TeamStatus>(member?.status ?? "active");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [machineIds, setMachineIds] = useState<string[]>(() =>
+    member ? machines.filter((machine) => machine.linkedUserIds.includes(member.id)).map((machine) => machine.id) : [],
+  );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const editingSelf = member?.id === currentUser.id;
+  const canSetMachines =
+    Boolean(permissions?.manageLinks) &&
+    role === "user" &&
+    (mode === "create" ||
+      currentUser.role === "admin" ||
+      currentUser.role === "superadmin" ||
+      member?.role === "user");
+
+  const toggleMachine = (id: string) =>
+    setMachineIds((current) => (current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]));
+
+  const saveMachineGrants = (userId: string): Promise<TeamOverview> =>
+    bridge.team.setUserMachineLinks(userId, machineIds);
 
   const submit = async () => {
     setError(null);
@@ -812,14 +1022,17 @@ function MemberDialog({
     try {
       if (mode === "create") {
         const input: TeamUserInput = { username, displayName, role, password };
-        const next = await bridge.team.createUser(input);
+        let next = await bridge.team.createUser(input);
+        const created = next.users.find((user) => user.username === username.trim().toLowerCase());
+        if (created && canSetMachines) next = await saveMachineGrants(created.id);
         onSaved(next);
         onToast("ok", "Member added", `${displayName.trim()} can now sign in.`);
       } else if (member) {
         const patch: TeamUserPatch = { displayName, status };
-        if (currentUser.role === "admin") patch.role = role;
+        if (currentUser.role === "admin" || currentUser.role === "superadmin") patch.role = role;
         if (password) patch.password = password;
-        const next = await bridge.team.updateUser(member.id, patch);
+        let next = await bridge.team.updateUser(member.id, patch);
+        if (canSetMachines) next = await saveMachineGrants(member.id);
         onSaved(next);
         onToast("ok", "Member updated", `${displayName.trim()} · ${ROLE_LABEL[role]}`);
       }
@@ -882,7 +1095,13 @@ function MemberDialog({
               </option>
             ))}
           </select>
-          {currentUser.role === "moderator" ? <em className="hint">Moderators can only manage standard members.</em> : null}
+          {currentUser.role === "moderator" ? (
+            <em className="hint">Moderators can only manage standard members.</em>
+          ) : currentUser.role === "admin" ? (
+            <em className="hint">Only a super admin can create or change super admin accounts.</em>
+          ) : (
+            <em className="hint">Super admins can manage every role. At least one active super admin is required.</em>
+          )}
         </label>
         <label className="field">
           <span>Status</span>
@@ -919,6 +1138,46 @@ function MemberDialog({
           </label>
         ) : null}
       </div>
+      {canSetMachines ? (
+        <section className="member-access">
+          <div className="section-title">
+            <h3>Machine access</h3>
+            <span className="mono subtle">
+              {machineIds.length} of {machines.length} linked
+            </span>
+          </div>
+          <p className="hint">
+            Standard members only see the SSH machines checked here. Admins and moderators already have access to every
+            machine.
+          </p>
+          {machines.length === 0 ? (
+            <p className="subtle small">No SSH machines yet. Add one in the SSH inventory first.</p>
+          ) : (
+            <div className="member-picker">
+              {machines.map((machine) => (
+                <label key={machine.id} className={cx("member-pick", machineIds.includes(machine.id) && "checked")}>
+                  <input
+                    type="checkbox"
+                    checked={machineIds.includes(machine.id)}
+                    onChange={() => toggleMachine(machine.id)}
+                    disabled={busy}
+                  />
+                  <span className="machine-mark" style={{ background: machine.color }} />
+                  <span className="member-pick-copy">
+                    <strong>{machine.label}</strong>
+                    <span className="mono">
+                      {machine.username}@{machine.host}:{machine.port}
+                    </span>
+                  </span>
+                  <span className="mono subtle">{machine.linkedUsers.length}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : member && role !== "user" ? (
+        <p className="hint">Admins and moderators can use every machine; no individual grants are needed.</p>
+      ) : null}
       {error ? <p className="form-error">{error}</p> : null}
       {mode === "edit" ? (
         <p className="hint">
@@ -956,7 +1215,8 @@ function ServerDrawer({
   onSaved: (overview: TeamOverview) => void;
   onToast: Toast;
 }) {
-  const canToggle = (user: TeamUser) => currentUser.role === "admin" || user.role === "user";
+  const canToggle = (user: TeamUser) =>
+    currentUser.role === "admin" || currentUser.role === "superadmin" || user.role === "user";
   const [host, setHost] = useState<SshHostSummary | null>(null);
   const [form, setForm] = useState<ServerDraft | null>(null);
   const [selected, setSelected] = useState<string[]>(machine.linkedUserIds);
@@ -1066,7 +1326,7 @@ function ServerDrawer({
     }
   };
 
-  return (
+  return createPortal(
     <div
       className="drawer-backdrop"
       onMouseDown={(event) => {
@@ -1269,7 +1529,8 @@ function ServerDrawer({
           </div>
         </footer>
       </aside>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -1351,7 +1612,8 @@ function SyncPanel({ onToast, onRefreshed }: { onToast: Toast; onRefreshed: () =
         <div className="sync-copy">
           <p>
             Connect this Nexus station to a self-hosted TLS relay so members, roles, machine grants and audit events
-            are the same on every computer. SSH keys, passwords and endpoint secrets stay local.
+            are the same on every computer. The same relay also backs the Shared files workspace. SSH keys, passwords
+            and endpoint secrets stay local.
           </p>
           <div className="sync-facts">
             <div><span>Workspace</span><strong>{status?.workspace ?? "default"}</strong></div>

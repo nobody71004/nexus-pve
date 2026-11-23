@@ -32,6 +32,7 @@ import { LinuxHosts } from "./components/LinuxHosts";
 import { NodeCard } from "./components/NodeCard";
 import { SshServerCard } from "./components/SshServerCard";
 import { PipelineStudio } from "./components/PipelineStudio";
+import { PointerFX } from "./components/PointerFX";
 import { PraetorHealthPanel } from "./components/PraetorHealthPanel";
 import { PraetorWorkspace } from "./components/PraetorWorkspace";
 import { RelayFabric } from "./components/RelayFabric";
@@ -40,15 +41,17 @@ import { Modal, Panel, Skeleton, StatTile, StatusDot, Toasts, type ToastItem } f
 import { SecurityWorkspace } from "./components/SecurityWorkspace";
 import { SettingsModal } from "./components/SettingsModal";
 import { TeamPanel } from "./components/TeamPanel";
+import { TeamFiles } from "./components/TeamFiles";
 import { Throughput } from "./components/Throughput";
 import { VmDrawer } from "./components/VmDrawer";
 import { VmTable } from "./components/VmTable";
 import { bridge, isMockBridge } from "./lib/bridge";
 import { ago, bytes, clock, cx, pct } from "./lib/format";
 import { helperAlertBreakdown, helperAlertCount, helperFleet, refreshHelpers, subscribeHelpers } from "./lib/helperFleet";
+import { usePrefersReducedMotion } from "./lib/prefersReducedMotion";
 import { UI_SCALE_DEFAULT, normalizeUiScale } from "../shared/ui-scale";
 
-type Tab = "overview" | "hosts" | "network" | "security" | "fabric" | "praetor" | "backups" | "pipelines" | "connections" | "team";
+type Tab = "overview" | "hosts" | "network" | "security" | "fabric" | "praetor" | "backups" | "pipelines" | "connections" | "team" | "files";
 
 const NAV: Array<{ id: Tab; label: string; icon: IconName }> = [
   { id: "overview", label: "Fleet overview", icon: "grid" },
@@ -60,6 +63,7 @@ const NAV: Array<{ id: Tab; label: string; icon: IconName }> = [
   { id: "backups", label: "Backup studio", icon: "shield" },
   { id: "pipelines", label: "Agent pipelines", icon: "agent" },
   { id: "connections", label: "Connections", icon: "plug" },
+  { id: "files", label: "Shared files", icon: "folder" },
   { id: "team", label: "Team access", icon: "users" },
 ];
 
@@ -75,6 +79,7 @@ interface ConfirmState {
 }
 
 export function App() {
+  const prefersReducedMotion = usePrefersReducedMotion();
   const [auth, setAuth] = useState<TeamAuthState | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
 
@@ -84,6 +89,16 @@ export function App() {
     } catch (err) {
       setBootError(err instanceof Error ? err.message : String(err));
     }
+  }, []);
+
+  // Keep this identity stable: TeamPanel reloads its overview when this
+  // callback changes, so an inline setter would create an update loop.
+  const handleUserChange = useCallback((user: TeamUser) => {
+    setAuth((current) => ({
+      initialized: true,
+      user,
+      expiresAt: current?.expiresAt ?? Date.now() + 12 * 60 * 60 * 1000,
+    }));
   }, []);
 
   useEffect(() => {
@@ -110,7 +125,7 @@ export function App() {
   if (bootError) {
     return (
       <div className="app auth-boot">
-        <Backdrop reduced={false} />
+        <Backdrop reduced={prefersReducedMotion} />
         <section className="auth-boot-card" role="alert">
           <span className="auth-glyph">
             <Icon name="alert" size={24} />
@@ -129,7 +144,7 @@ export function App() {
   if (!auth) {
     return (
       <div className="app auth-boot">
-        <Backdrop reduced={false} />
+        <Backdrop reduced={prefersReducedMotion} />
         <div className="auth-boot-mark">
           <span className="brand-mark live">
             <i />
@@ -145,6 +160,7 @@ export function App() {
   if (!auth.user) {
     return (
       <AuthScreen
+        reduced={prefersReducedMotion}
         initialized={auth.initialized}
         onAuthenticated={(user) => {
           setAuth({ initialized: true, user, expiresAt: Date.now() + 12 * 60 * 60 * 1000 });
@@ -157,9 +173,10 @@ export function App() {
 
   return (
     <Workspace
+      systemReducedMotion={prefersReducedMotion}
       currentUser={auth.user}
       sessionExpiresAt={auth.expiresAt}
-      onUserChange={(user) => setAuth((current) => ({ initialized: true, user, expiresAt: current?.expiresAt ?? Date.now() + 12 * 60 * 60 * 1000 }))}
+      onUserChange={handleUserChange}
       onLogout={async () => {
         try {
           await bridge.auth.logout();
@@ -172,11 +189,13 @@ export function App() {
 }
 
 function Workspace({
+  systemReducedMotion,
   currentUser,
   sessionExpiresAt,
   onUserChange,
   onLogout,
 }: {
+  systemReducedMotion: boolean;
   currentUser: TeamUser;
   sessionExpiresAt: number | null;
   onUserChange: (user: TeamUser) => void;
@@ -197,7 +216,7 @@ function Workspace({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
-  const [motion, setMotion] = useState(true);
+  const [motion, setMotion] = useState(() => !systemReducedMotion);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [uiScale, setUiScale] = useState(UI_SCALE_DEFAULT);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -234,6 +253,10 @@ function Workspace({
   useEffect(() => {
     setExpiresAt(sessionExpiresAt);
   }, [sessionExpiresAt]);
+
+  useEffect(() => {
+    if (systemReducedMotion) setMotion(false);
+  }, [systemReducedMotion]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setClockNow(Date.now()), 30_000);
@@ -285,7 +308,7 @@ function Workspace({
         const preferred = hostList.find((host) => host.id === stored) ?? hostList[0];
         setActiveHostId(preferred?.id ?? null);
         const motionPref = localStorage.getItem("nexus.motion");
-        if (motionPref === "off" || window.matchMedia("(prefers-reduced-motion: reduce)").matches) setMotion(false);
+        if (motionPref === "off") setMotion(false);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       }
@@ -299,7 +322,7 @@ function Workspace({
   const visibleNav = useMemo(
     () =>
       currentUser.role === "user"
-        ? NAV.filter((item) => item.id === "hosts" || item.id === "network" || item.id === "team")
+        ? NAV.filter((item) => item.id === "hosts" || item.id === "network" || item.id === "files" || item.id === "team")
         : NAV,
     [currentUser.role],
   );
@@ -977,6 +1000,7 @@ function Workspace({
   return (
     <div className="app">
       <Backdrop reduced={!motion} />
+      <PointerFX enabled={motion} />
       <TitleBar
         health={health}
         onPalette={() => setPaletteOpen(true)}
@@ -1059,7 +1083,16 @@ function Workspace({
               <span className="avatar">{currentUser.displayName.trim().split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || currentUser.username.slice(0, 2).toUpperCase()}</span>
               <div>
                 <strong>{currentUser.displayName}</strong>
-                <span className="mono">@{currentUser.username} · {currentUser.role === "admin" ? "Admin" : currentUser.role === "moderator" ? "Mod" : "Member"}</span>
+                <span className="mono">
+                  @{currentUser.username} ·{" "}
+                  {currentUser.role === "superadmin"
+                    ? "Super admin"
+                    : currentUser.role === "admin"
+                      ? "Admin"
+                      : currentUser.role === "moderator"
+                        ? "Mod"
+                        : "Member"}
+                </span>
               </div>
               <button className="btn icon ghost" onClick={() => void onLogout()} title="Sign out">
                 <Icon name="logout" size={13} />
@@ -1092,6 +1125,8 @@ function Workspace({
                         ? "Agent pipelines"
                         : tab === "team"
                           ? "Team access"
+                          : tab === "files"
+                            ? "Shared files"
                           : "Connections"}
               </h1>
               <p>
@@ -1113,6 +1148,8 @@ function Workspace({
                         ? "Multi-step agent operations with explicit human approval gates."
                         : tab === "team"
                           ? "Accounts, roles, machine grants and the workspace audit trail."
+                          : tab === "files"
+                            ? "Self-hosted team file sharing with streamed uploads and no app-level size cap."
                           : "Proxmox API endpoints and credential handling."}
               </p>
             </div>
@@ -1156,6 +1193,8 @@ function Workspace({
 
           {tab === "hosts" ? (
             <LinuxHosts onToast={notify} onOpenNetwork={() => setTab("network")} canManage={currentUser.role !== "user"} />
+          ) : tab === "files" ? (
+            <TeamFiles currentUser={currentUser} onOpenTeam={() => setTab("team")} onToast={notify} />
           ) : tab === "team" ? (
             <TeamPanel
               currentUser={currentUser}

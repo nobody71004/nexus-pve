@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import type { SshKeyOverview } from "../../shared/types";
+import type { SshKeyIssueResult, SshKeyOverview, TeamMachine, TeamUser } from "../../shared/types";
 import { bridge } from "../lib/bridge";
+import { SshKeyReveal } from "./SshKeyReveal";
 
 function ago(at: number): string {
   if (!at) return "never";
@@ -26,6 +27,12 @@ export function SshKeysPanel({ onToast }: { onToast: (level: "info" | "warn" | "
   const [label, setLabel] = useState("");
   const [owner, setOwner] = useState("operator");
   const [targets, setTargets] = useState<Record<string, string>>({});
+  const [members, setMembers] = useState<TeamUser[]>([]);
+  const [teamMachines, setTeamMachines] = useState<TeamMachine[]>([]);
+  const [memberId, setMemberId] = useState("");
+  const [memberHostId, setMemberHostId] = useState("");
+  const [memberRotate, setMemberRotate] = useState(false);
+  const [revealed, setRevealed] = useState<SshKeyIssueResult | null>(null);
 
   const refresh = async () => {
     try {
@@ -44,6 +51,51 @@ export function SshKeysPanel({ onToast }: { onToast: (level: "info" | "warn" | "
       setError(null);
     });
   }, []);
+
+  useEffect(() => {
+    void bridge.team
+      .overview()
+      .then((team) => {
+        const standard = team.users.filter((user) => user.role === "user");
+        setMembers(standard);
+        setTeamMachines(team.machines);
+        setMemberId((current) => (current && standard.some((user) => user.id === current) ? current : standard[0]?.id ?? ""));
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+  }, []);
+
+  const memberHosts = overview
+    ? overview.hosts.filter((host) => {
+        const machine = teamMachines.find((entry) => entry.id === host.hostId);
+        return !machine || machine.linkedUserIds.includes(memberId);
+      })
+    : [];
+
+  useEffect(() => {
+    if (!overview) return;
+    setMemberHostId((current) =>
+      memberHosts.some((host) => host.hostId === current) ? current : (memberHosts[0]?.hostId ?? ""),
+    );
+    // memberHosts is derived from these three inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overview, memberId, teamMachines]);
+
+  const issueMemberKey = async (input: { hostId: string; userId?: string; rotate?: boolean }) => {
+    setBusy("issue-member");
+    setError(null);
+    try {
+      const result = await bridge.sshkeys.issue(input);
+      setRevealed(result);
+      await refresh();
+      onToast("ok", "Machine key issued", `${result.key.label} · ${result.fingerprint.slice(0, 22)}…`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      onToast("error", "Could not issue machine key", message);
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const run = async (name: string, action: () => Promise<unknown>, success?: string) => {
     setBusy(name);
@@ -68,8 +120,11 @@ export function SshKeysPanel({ onToast }: { onToast: (level: "info" | "warn" | "
     );
   }
 
-  const activeKeys = overview.keys.filter((key) => key.status === "active");
-  const retiredKeys = overview.keys.filter((key) => key.status === "retired");
+  const operatorKeys = overview.keys.filter((key) => !key.assignedTo);
+  const activeKeys = operatorKeys.filter((key) => key.status === "active");
+  const retiredKeys = operatorKeys.filter((key) => key.status === "retired");
+  const issuedKeys = overview.keys.filter((key) => key.assignedTo && key.status === "active");
+  const retiredIssued = overview.keys.filter((key) => key.assignedTo && key.status === "retired").length;
   const hostName = (hostId: string) => overview.hosts.find((host) => host.hostId === hostId)?.label ?? hostId;
   const firstHost = overview.hosts[0]?.hostId ?? "";
 
@@ -144,6 +199,105 @@ export function SshKeysPanel({ onToast }: { onToast: (level: "info" | "warn" | "
         >
           Generate key
         </button>
+      </div>
+
+      <div className="sshkeys-create member">
+        <div className="sshkeys-create-copy">
+          <strong>Issue a machine key to a member</strong>
+          <span>One key, one machine. The private half is revealed once for the member to install.</span>
+        </div>
+        <select
+          aria-label="Member"
+          value={memberId}
+          onChange={(event) => setMemberId(event.target.value)}
+          disabled={Boolean(busy) || members.length === 0}
+        >
+          {members.length === 0 ? <option value="">No standard members</option> : null}
+          {members.map((member) => (
+            <option key={member.id} value={member.id}>
+              {member.displayName} (@{member.username})
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Machine"
+          value={memberHostId}
+          onChange={(event) => setMemberHostId(event.target.value)}
+          disabled={Boolean(busy) || memberHosts.length === 0}
+        >
+          {memberHosts.length === 0 ? <option value="">No machines granted</option> : null}
+          {memberHosts.map((host) => (
+            <option key={host.hostId} value={host.hostId}>
+              {host.label} — {host.username}@{host.host}
+            </option>
+          ))}
+        </select>
+        <label className="sshkeys-rotate">
+          <input
+            type="checkbox"
+            checked={memberRotate}
+            onChange={(event) => setMemberRotate(event.target.checked)}
+            disabled={Boolean(busy)}
+          />
+          <span>Rotate</span>
+        </label>
+        <button
+          className="sshkeys-btn primary"
+          disabled={Boolean(busy) || !memberId || !memberHostId}
+          onClick={() => void issueMemberKey({ hostId: memberHostId, userId: memberId, rotate: memberRotate })}
+        >
+          {busy === "issue-member" ? "Issuing…" : "Issue & reveal"}
+        </button>
+      </div>
+
+      <div className="sshkeys-issued">
+        <div className="sshkeys-section-head">
+          <h3>Member machine access</h3>
+          <span>
+            {issuedKeys.length} active{retiredIssued ? ` · ${retiredIssued} retired` : ""}
+          </span>
+        </div>
+        {issuedKeys.length === 0 ? (
+          <div className="sshkeys-empty">No member machine keys yet. Issue one above, or let a member create their own from Team access.</div>
+        ) : (
+          <div className="sshkeys-issued-list">
+            {issuedKeys.map((key) => (
+              <article className="sshkeys-issued-row" key={key.id}>
+                <div className="sshkeys-issued-who">
+                  <strong>{key.assignedTo?.displayName ?? key.owner}</strong>
+                  <span>
+                    @{key.assignedTo?.username ?? "member"} → {hostName(key.issuedHostId ?? "")}
+                  </span>
+                </div>
+                <code title={key.fingerprint}>{shortFingerprint(key.fingerprint)}</code>
+                <span className="subtle">{ago(key.createdAt)}</span>
+                <div className="sshkeys-key-actions">
+                  <button
+                    className="sshkeys-btn"
+                    disabled={Boolean(busy) || !key.issuedHostId || !key.assignedTo}
+                    onClick={() => {
+                      if (!key.issuedHostId || !key.assignedTo) return;
+                      if (!window.confirm(`Rotate ${key.label}? The member's old key is removed from the machine.`)) return;
+                      void issueMemberKey({ hostId: key.issuedHostId, userId: key.assignedTo.id, rotate: true });
+                    }}
+                  >
+                    Rotate
+                  </button>
+                  <button
+                    className="sshkeys-btn danger"
+                    disabled={Boolean(busy)}
+                    onClick={() => {
+                      if (!window.confirm(`Revoke ${key.label}? The member loses direct SSH access to this machine.`)) return;
+                      void run("revoke", () => bridge.sshkeys.revoke(key.id, true), `Revoked ${key.label}`);
+                    }}
+                  >
+                    Revoke
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="sshkeys-grid">
@@ -272,6 +426,8 @@ export function SshKeysPanel({ onToast }: { onToast: (level: "info" | "warn" | "
           ))}
         </div>
       </div>
+
+      {revealed ? <SshKeyReveal result={revealed} onClose={() => setRevealed(null)} onToast={onToast} /> : null}
 
       <div className="sshkeys-events">
         <div className="sshkeys-section-head">

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type {
   HelperState,
   HelperStatus,
@@ -1522,7 +1523,7 @@ export function LinuxHosts({
         </Modal>
       ) : null}
 
-      {confirmKind ? (
+      {confirmKind ? createPortal(
         <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !acting && setConfirmKind(null)}>
           <div className="modal" role="dialog" aria-modal="true" style={{ width: 460 }}>
             <header>
@@ -1575,7 +1576,8 @@ export function LinuxHosts({
               </button>
             </footer>
           </div>
-        </div>
+        </div>,
+        document.body,
       ) : null}
     </div>
   );

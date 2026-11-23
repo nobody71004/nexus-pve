@@ -1,0 +1,367 @@
+/* ------------------------------------------------------------------ pointer */
+
+.pointer-fx {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------- reactive surfaces */
+
+html.fx-on .panel,
+html.fx-on .team-summary,
+html.fx-on .sshkeys-panel,
+html.fx-on .sshkeys-key,
+html.fx-on .sshkeys-host,
+html.fx-on .sshkeys-issued,
+html.fx-on .stat-tile {
+  transition:
+    border-color 0.32s var(--ease),
+    box-shadow 0.32s var(--ease),
+    transform 0.32s var(--ease);
+}
+
+html.fx-on .panel::after,
+html.fx-on .team-summary::after,
+html.fx-on .sshkeys-key::after,
+html.fx-on .sshkeys-host::after,
+html.fx-on .sshkeys-issued::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  background: radial-gradient(
+    250px circle at var(--fx-x, -600px) var(--fx-y, -600px),
+    rgba(62, 242, 255, 0.14),
+    rgba(124, 92, 255, 0.06) 42%,
+    transparent 72%
+  );
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+  mix-blend-mode: screen;
+}
+
+html.fx-on .panel:hover::after,
+html.fx-on .team-summary:hover::after,
+html.fx-on .sshkeys-key:hover::after,
+html.fx-on .sshkeys-host:hover::after,
+html.fx-on .sshkeys-issued:hover::after {
+  opacity: 1;
+}
+
+html.fx-on .panel:hover,
+html.fx-on .team-summary:hover,
+html.fx-on .sshkeys-panel:hover {
+  border-color: rgba(62, 242, 255, 0.22);
+  box-shadow:
+    0 24px 60px -46px rgba(62, 242, 255, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.055);
+}
+
+html.fx-on .sshkeys-key:hover,
+html.fx-on .sshkeys-host:hover,
+html.fx-on .stat-tile:hover {
+  border-color: rgba(62, 242, 255, 0.28);
+  transform: translateY(-2px);
+  box-shadow: 0 18px 38px -30px rgba(62, 242, 255, 0.55);
+}
+
+/* --------------------------------------------------------------- nav rail */
+
+html.fx-on .rail-item {
+  overflow: hidden;
+  transition:
+    color 0.2s,
+    background 0.2s,
+    transform 0.2s var(--ease),
+    box-shadow 0.25s;
+}
+
+html.fx-on .rail-item::after {
+  content: "";
+  position: absolute;
+  inset: auto 8px 0;
+  height: 1px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, rgba(62, 242, 255, 0.8), transparent);
+  opacity: 0;
+  transform: scaleX(0.2);
+  transition:
+    opacity 0.2s,
+    transform 0.35s var(--ease);
+  pointer-events: none;
+}
+
+html.fx-on .rail-item:hover {
+  transform: translateX(2px);
+}
+
+html.fx-on .rail-item:hover::after {
+  opacity: 0.9;
+  transform: scaleX(1);
+}
+
+html.fx-on .rail-item:hover svg {
+  animation: fx-icon-pop 0.42s var(--ease);
+}
+
+html.fx-on .rail-item.active::before {
+  animation: fx-rail-breathe 2.8s ease-in-out infinite;
+}
+
+html.fx-on .rail-item.active svg {
+  filter: drop-shadow(0 0 7px rgba(62, 242, 255, 0.75));
+}
+
+/* ---------------------------------------------------------------- buttons */
+
+html.fx-on .btn,
+html.fx-on .sshkeys-btn,
+html.fx-on .win-btn,
+html.fx-on .rail-add {
+  position: relative;
+  overflow: hidden;
+  transition:
+    transform 0.14s var(--ease),
+    border-color 0.2s,
+    background 0.2s,
+    box-shadow 0.25s,
+    color 0.2s;
+}
+
+html.fx-on .btn::after,
+html.fx-on .sshkeys-btn::after {
+  content: "";
+  position: absolute;
+  top: -60%;
+  bottom: -60%;
+  left: -35%;
+  width: 28%;
+  background: linear-gradient(90deg, transparent, rgba(235, 255, 255, 0.32), transparent);
+  transform: skewX(-18deg);
+  opacity: 0;
+  pointer-events: none;
+}
+
+html.fx-on .btn:hover:not(:disabled)::after,
+html.fx-on .sshkeys-btn:hover:not(:disabled)::after {
+  animation: fx-sheen 0.62s var(--ease);
+}
+
+html.fx-on .btn:hover:not(:disabled),
+html.fx-on .sshkeys-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+html.fx-on .btn:active:not(:disabled),
+html.fx-on .sshkeys-btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.975);
+}
+
+html.fx-on .btn.primary {
+  animation: fx-primary-glow 4.4s ease-in-out infinite;
+}
+
+html.fx-on .btn.icon:hover:not(:disabled) svg,
+html.fx-on .win-btn:hover svg {
+  animation: fx-icon-pop 0.4s var(--ease);
+}
+
+/* ------------------------------------------------------------------- tabs */
+
+html.fx-on .team-tab,
+html.fx-on .sec-tab,
+html.fx-on .console-tab,
+html.fx-on .gpu-tab {
+  position: relative;
+  overflow: hidden;
+  transition:
+    color 0.2s,
+    background 0.2s,
+    box-shadow 0.2s,
+    transform 0.2s var(--ease);
+}
+
+html.fx-on .team-tab:hover,
+html.fx-on .sec-tab:hover,
+html.fx-on .console-tab:hover,
+html.fx-on .gpu-tab:hover {
+  transform: translateY(-1px);
+}
+
+html.fx-on .team-tab.active::after,
+html.fx-on .sec-tab.active::after,
+html.fx-on .console-tab.active::after,
+html.fx-on .gpu-tab.active::after {
+  content: "";
+  position: absolute;
+  right: 24%;
+  bottom: 4px;
+  left: 24%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  animation: fx-tab-breathe 2.3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+html.fx-on .team-tab:active,
+html.fx-on .sec-tab:active,
+html.fx-on .console-tab:active,
+html.fx-on .gpu-tab:active {
+  transform: translateY(0) scale(0.98);
+}
+
+/* ------------------------------------------------------------ interactions */
+
+html.fx-on .member-pick {
+  transition:
+    background 0.18s,
+    transform 0.18s var(--ease),
+    padding-left 0.18s;
+}
+
+html.fx-on .member-pick:hover {
+  padding-left: 12px;
+  transform: translateX(1px);
+}
+
+html.fx-on .member-pick.checked {
+  animation: fx-check-glow 2.6s ease-in-out infinite;
+}
+
+html.fx-on .team-table tbody tr {
+  transition: background 0.18s;
+}
+
+html.fx-on .team-table tbody tr:hover {
+  background: linear-gradient(90deg, rgba(62, 242, 255, 0.075), rgba(62, 242, 255, 0.015) 55%, transparent);
+}
+
+html.fx-on .stat-tile:hover .stat-value {
+  color: #bffbff;
+  text-shadow: 0 0 22px rgba(62, 242, 255, 0.45);
+}
+
+html.fx-on .chip:hover {
+  transform: translateY(-1px);
+}
+
+html.fx-on .chip {
+  transition: transform 0.18s var(--ease);
+}
+
+html.fx-on .rail-host:hover,
+html.fx-on .rail-add:hover {
+  animation: fx-hover-nudge 0.4s var(--ease);
+}
+
+html.fx-on .backdrop-scan {
+  animation-duration: 9s;
+}
+
+/* --------------------------------------------------------------- keyframes */
+
+@keyframes fx-sheen {
+  0% {
+    left: -35%;
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  100% {
+    left: 118%;
+    opacity: 0;
+  }
+}
+
+@keyframes fx-icon-pop {
+  0% {
+    transform: scale(1) rotate(0deg);
+  }
+  38% {
+    transform: scale(1.22) rotate(-8deg);
+  }
+  72% {
+    transform: scale(0.94) rotate(3deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+@keyframes fx-hover-nudge {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  45% {
+    transform: translateX(3px);
+  }
+}
+
+@keyframes fx-tab-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scaleX(0.72);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes fx-rail-breathe {
+  0%,
+  100% {
+    opacity: 0.65;
+    box-shadow: 0 0 10px var(--cyan);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 20px var(--cyan);
+  }
+}
+
+@keyframes fx-primary-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 10px 30px -16px rgba(62, 242, 255, 0.7),
+      inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  }
+  50% {
+    box-shadow:
+      0 12px 38px -12px rgba(62, 242, 255, 0.95),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
+}
+
+@keyframes fx-check-glow {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 1px rgba(62, 242, 255, 0.06);
+  }
+  50% {
+    box-shadow: inset 0 0 0 1px rgba(62, 242, 255, 0.22);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.fx-on .btn.primary,
+  html.fx-on .rail-item.active::before,
+  html.fx-on .team-tab.active::after,
+  html.fx-on .sec-tab.active::after,
+  html.fx-on .console-tab.active::after,
+  html.fx-on .gpu-tab.active::after,
+  html.fx-on .member-pick.checked,
+  html.fx-on .backdrop-scan {
+    animation: none;
+  }
+}

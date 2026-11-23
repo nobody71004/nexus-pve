@@ -44,6 +44,7 @@ import type {
   SshKeyEnforceResult,
   SshKeyEvent,
   SshKeyHostReport,
+  SshKeyIssueResult,
   SshKeyOverview,
   SshKeyPolicy,
   SecurityScan,
@@ -57,7 +58,15 @@ import type {
   TeamAuditFilter,
   TeamAuditResult,
   TeamAuthState,
+  TeamBoard,
+  TeamBoardList,
+  TeamBoardTask,
+  TeamBoardTaskInput,
+  TeamBoardTaskPatch,
   TeamBootstrapInput,
+  TeamChat,
+  TeamChatMessage,
+  TeamFileEntry,
   TeamLoginInput,
   TeamMachine,
   TeamOverview,
@@ -838,7 +847,7 @@ const mockAdmin: TeamUser = {
   id: "user-admin",
   username: "owner",
   displayName: "Morgan Lee",
-  role: "admin",
+  role: "superadmin",
   status: "active",
   createdAt: mockTeamNow - 86_400_000 * 90,
   updatedAt: mockTeamNow - 86_400_000 * 2,
@@ -912,6 +921,89 @@ let mockTeamActivity: TeamActivityEntry[] = [
   },
 ];
 
+let mockChatMessages: TeamChatMessage[] = [
+  {
+    id: "chat-1",
+    authorUsername: "riley",
+    authorName: "Riley Chen",
+    authorRole: "moderator",
+    body: "Edge relay is back to 42 ms after the route change. I left the verification notes on the billboard.",
+    createdAt: mockTeamNow - 26 * 60_000,
+  },
+  {
+    id: "chat-2",
+    authorUsername: "sam",
+    authorName: "Sam Okafor",
+    authorRole: "user",
+    body: "Thanks — I can reach both linked machines again. I’ll pick up the certificate task next.",
+    createdAt: mockTeamNow - 18 * 60_000,
+  },
+  {
+    id: "chat-3",
+    authorUsername: "owner",
+    authorName: "Morgan Lee",
+    authorRole: "superadmin",
+    body: "Good. Keep the pinned tasks current and add notes here if a handoff needs context.",
+    createdAt: mockTeamNow - 9 * 60_000,
+  },
+];
+
+let mockBoardLists: TeamBoardList[] = [
+  { id: "board-list-todo", title: "To do", position: 0, createdByUsername: "system", createdAt: mockTeamNow - 86_400_000 * 30, updatedAt: mockTeamNow - 86_400_000 * 30 },
+  { id: "board-list-doing", title: "In progress", position: 1, createdByUsername: "system", createdAt: mockTeamNow - 86_400_000 * 30, updatedAt: mockTeamNow - 86_400_000 * 30 },
+  { id: "board-list-done", title: "Done", position: 2, createdByUsername: "system", createdAt: mockTeamNow - 86_400_000 * 30, updatedAt: mockTeamNow - 86_400_000 * 30 },
+];
+
+let mockBoardTasks: TeamBoardTask[] = [
+  {
+    id: "task-1",
+    listId: "board-list-todo",
+    title: "Rotate the edge relay TLS certificate",
+    detail: "Stage the new certificate, verify the upload, then reload the relay during the next maintenance window.",
+    pinned: true,
+    authorUsername: "owner",
+    authorName: "Morgan Lee",
+    authorRole: "superadmin",
+    createdAt: mockTeamNow - 2 * 3_600_000,
+    updatedAt: mockTeamNow - 2 * 3_600_000,
+  },
+  {
+    id: "task-2",
+    listId: "board-list-doing",
+    title: "Verify off-site backup restore",
+    detail: "Restore the latest archive into the staging pool and check the database integrity output.",
+    pinned: false,
+    authorUsername: "riley",
+    authorName: "Riley Chen",
+    authorRole: "moderator",
+    createdAt: mockTeamNow - 6 * 3_600_000,
+    updatedAt: mockTeamNow - 24 * 60_000,
+  },
+  {
+    id: "task-3",
+    listId: "board-list-done",
+    title: "Document the SSH key rotation policy",
+    detail: "Published in the security runbook and linked from the team workspace.",
+    pinned: false,
+    authorUsername: "sam",
+    authorName: "Sam Okafor",
+    authorRole: "user",
+    createdAt: mockTeamNow - 86_400_000 * 2,
+    updatedAt: mockTeamNow - 86_400_000,
+  },
+];
+
+function mockChat(): TeamChat {
+  return { messages: [...mockChatMessages].sort((left, right) => left.createdAt - right.createdAt) };
+}
+
+function mockBoard(): TeamBoard {
+  return {
+    lists: [...mockBoardLists].sort((left, right) => left.position - right.position || left.createdAt - right.createdAt),
+    tasks: [...mockBoardTasks].sort((left, right) => Number(right.pinned) - Number(left.pinned) || left.createdAt - right.createdAt),
+  };
+}
+
 function mockTeamMachines(): TeamMachine[] {
   return sshHosts.map((host) => {
     const linkedUserIds = mockMachineLinks[host.id] ?? [];
@@ -944,7 +1036,7 @@ function mockTeamOverview(): TeamOverview {
     activity: mockTeamActivity,
     counts: {
       members: mockUsers.length,
-      admins: mockUsers.filter((user) => user.role === "admin").length,
+      admins: mockUsers.filter((user) => user.role === "admin" || user.role === "superadmin").length,
       moderators: mockUsers.filter((user) => user.role === "moderator").length,
       machines: machines.length,
       links: machines.reduce((sum, machine) => sum + machine.linkedUserIds.length, 0),
@@ -955,7 +1047,7 @@ function mockTeamOverview(): TeamOverview {
 }
 
 function mockRole(value: TeamRole | undefined): TeamRole {
-  return value === "admin" || value === "moderator" ? value : "user";
+  return value === "superadmin" || value === "admin" || value === "moderator" ? value : "user";
 }
 
 function makeSshSnapshot(host: SshHostSummary): SshSnapshot {
@@ -1442,6 +1534,24 @@ export function createMockBridge(): NexusBridge {
     counts: { users: mockUsers.length, machines: sshHosts.length, activity: mockTeamActivity.length },
   });
   let syncStatus = mockSyncStatus();
+  let mockTeamFiles: TeamFileEntry[] = [
+    {
+      id: "11111111-1111-4111-8111-111111111111",
+      name: "nexus-server-installer.zip",
+      size: 734_003_200,
+      uploadedBy: mockAdmin.username,
+      uploadedAt: Date.now() - 1000 * 60 * 42,
+      contentType: "application/zip",
+    },
+    {
+      id: "22222222-2222-4222-8222-222222222222",
+      name: "team-runbook.pdf",
+      size: 4_812_600,
+      uploadedBy: mockUsers[1]?.username ?? mockAdmin.username,
+      uploadedAt: Date.now() - 1000 * 60 * 60 * 5,
+      contentType: "application/pdf",
+    },
+  ];
   const filterAudit = (filter?: TeamAuditFilter): TeamActivityEntry[] => {
     const query = (filter?.query ?? "").trim().toLowerCase();
     const entries = mockTeamActivity.filter((entry) => {
@@ -1555,6 +1665,25 @@ export function createMockBridge(): NexusBridge {
         ];
         return mockTeamOverview();
       },
+      setUserMachineLinks: async (userId: string, machineIds: string[]) => {
+        const target = mockUsers.find((user) => user.id === userId);
+        if (!target) throw new Error("Member not found.");
+        const unique = [...new Set(machineIds)];
+        const available = new Set(mockTeamMachines().map((machine) => machine.id));
+        if (unique.some((id) => !available.has(id))) {
+          throw new Error("One of the selected machines no longer exists. Refresh the inventory and try again.");
+        }
+        const next = Object.fromEntries(
+          Object.entries(mockMachineLinks).map(([machineId, ids]) => [machineId, ids.filter((id) => id !== userId)]),
+        );
+        for (const machineId of unique) next[machineId] = [...new Set([...(next[machineId] ?? []), userId])];
+        mockMachineLinks = next;
+        mockTeamActivity = [
+          { id: `act-${Date.now()}`, at: Date.now(), actorId: mockAdmin.id, actorName: mockAdmin.displayName, action: "machine.links", targetType: "user", targetId: userId, targetName: target.displayName, detail: unique.length === 0 ? "All machine access revoked" : `${unique.length} machine${unique.length === 1 ? "" : "s"} granted` },
+          ...mockTeamActivity,
+        ];
+        return mockTeamOverview();
+      },
       audit: async (filter?: TeamAuditFilter): Promise<TeamAuditResult> => {
         const entries = filterAudit(filter);
         return { entries, total: filter?.query || filter?.action || filter?.actorId || (filter?.targetType && filter.targetType !== "all") ? entries.length : mockTeamActivity.length };
@@ -1562,6 +1691,88 @@ export function createMockBridge(): NexusBridge {
       exportAudit: async (filter?: TeamAuditFilter): Promise<TeamAuditExportResult> => {
         const entries = filterAudit(filter);
         return { count: entries.length, filename: `nexus-team-audit-${new Date().toISOString().slice(0, 10)}.csv`, path: "/mock/nexus-team-audit.csv" };
+      },
+      chat: async (): Promise<TeamChat> => mockChat(),
+      postMessage: async (body: string): Promise<TeamChat> => {
+        const text = body.trim();
+        if (!text) throw new Error("Write a message before sending.");
+        mockChatMessages = [
+          ...mockChatMessages,
+          {
+            id: `chat-${Date.now()}`,
+            authorUsername: mockAdmin.username,
+            authorName: mockAdmin.displayName,
+            authorRole: mockAdmin.role,
+            body: text,
+            createdAt: Date.now(),
+          },
+        ];
+        return mockChat();
+      },
+      board: async (): Promise<TeamBoard> => mockBoard(),
+      createBoardList: async (title: string): Promise<TeamBoard> => {
+        if (mockBoardLists.length >= 12) throw new Error("The billboard is limited to 12 lists.");
+        const name = title.trim();
+        if (!name) throw new Error("Give the list a name.");
+        mockBoardLists = [
+          ...mockBoardLists,
+          {
+            id: `board-list-${Date.now()}`,
+            title: name,
+            position: Math.max(-1, ...mockBoardLists.map((list) => list.position)) + 1,
+            createdByUsername: mockAdmin.username,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ];
+        return mockBoard();
+      },
+      deleteBoardList: async (id: string): Promise<TeamBoard> => {
+        if (mockBoardLists.length <= 1) throw new Error("Keep at least one board list.");
+        mockBoardLists = mockBoardLists.filter((list) => list.id !== id);
+        mockBoardTasks = mockBoardTasks.filter((task) => task.listId !== id);
+        return mockBoard();
+      },
+      createBoardTask: async (input: TeamBoardTaskInput): Promise<TeamBoard> => {
+        if (!mockBoardLists.some((list) => list.id === input.listId)) throw new Error("Choose an existing board list.");
+        const title = input.title.trim();
+        if (!title) throw new Error("Give the task a title.");
+        const now = Date.now();
+        mockBoardTasks = [
+          ...mockBoardTasks,
+          {
+            id: `task-${Date.now()}`,
+            listId: input.listId,
+            title,
+            detail: input.detail?.trim() || undefined,
+            pinned: input.pinned === true,
+            authorUsername: mockAdmin.username,
+            authorName: mockAdmin.displayName,
+            authorRole: mockAdmin.role,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ];
+        return mockBoard();
+      },
+      updateBoardTask: async (id: string, patch: TeamBoardTaskPatch): Promise<TeamBoard> => {
+        mockBoardTasks = mockBoardTasks.map((task) =>
+          task.id === id
+            ? {
+                ...task,
+                listId: patch.listId ?? task.listId,
+                title: patch.title?.trim() || task.title,
+                detail: patch.detail === undefined ? task.detail : patch.detail.trim() || undefined,
+                pinned: patch.pinned ?? task.pinned,
+                updatedAt: Date.now(),
+              }
+            : task,
+        );
+        return mockBoard();
+      },
+      deleteBoardTask: async (id: string): Promise<TeamBoard> => {
+        mockBoardTasks = mockBoardTasks.filter((task) => task.id !== id);
+        return mockBoard();
       },
     },
     teamSync: {
@@ -1588,6 +1799,40 @@ export function createMockBridge(): NexusBridge {
       disable: async () => {
         syncStatus = mockSyncStatus();
         return syncStatus;
+      },
+    },
+    teamFiles: {
+      overview: async () => ({
+        configured: syncStatus.enabled,
+        ...(syncStatus.endpoint ? { endpoint: syncStatus.endpoint } : {}),
+        files: syncStatus.enabled ? mockTeamFiles : [],
+      }),
+      upload: async () => {
+        if (!syncStatus.enabled) throw new Error("Connect Team sync to a relay before sharing files.");
+        const entry: TeamFileEntry = {
+          id: `33333333-3333-4333-8333-${String(Date.now()).slice(-12)}`,
+          name: `shared-${new Date().toISOString().slice(0, 10)}.bin`,
+          size: 52_428_800,
+          uploadedBy: mockAdmin.username,
+          uploadedAt: Date.now(),
+          contentType: "application/octet-stream",
+        };
+        mockTeamFiles = [entry, ...mockTeamFiles];
+        return {
+          configured: true,
+          ...(syncStatus.endpoint ? { endpoint: syncStatus.endpoint } : {}),
+          files: mockTeamFiles,
+        };
+      },
+      download: async () => null,
+      serverScript: async () => "team-sync-server.mjs",
+      remove: async (id: string) => {
+        mockTeamFiles = mockTeamFiles.filter((entry) => entry.id !== id);
+        return {
+          configured: syncStatus.enabled,
+          ...(syncStatus.endpoint ? { endpoint: syncStatus.endpoint } : {}),
+          files: syncStatus.enabled ? mockTeamFiles : [],
+        };
       },
     },
     hosts: {
@@ -1840,6 +2085,68 @@ export function createMockBridge(): NexusBridge {
         emit({ type: "sshkeys", sshKeys: overview });
         return overview;
       },
+      issue: async (input): Promise<SshKeyIssueResult> => {
+        const host = sshHosts.find((entry) => entry.id === input.hostId);
+        if (!host) throw new Error("Unknown SSH machine");
+        const assignee = mockUsers.find((entry) => entry.id === input.userId) ?? mockAdmin;
+        const existing = mockManagedSshKeys.find(
+          (entry) =>
+            entry.status === "active" && entry.assignedTo?.id === assignee.id && entry.issuedHostId === host.id,
+        );
+        if (existing && !input.rotate) {
+          throw new Error(`@${assignee.username} already has an active key for ${host.label}. Rotate it instead.`);
+        }
+        const now = Date.now();
+        const id = `key-${now}`;
+        const label = input.label || `${assignee.username}@${host.label}`;
+        const key: ManagedSshKey = {
+          id,
+          label,
+          owner: assignee.displayName,
+          comment: `nexus/${assignee.username}/${host.label}/${label}`,
+          algorithm: "ssh-ed25519",
+          fingerprint: `SHA256:mock-${id}`,
+          publicKey: `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILlg7H2uPpeDzV8H2mmt/ag0j4fFE2lwfS3MQtkWPla5 ${id}`,
+          createdAt: now,
+          status: "active",
+          hosts: [host.id],
+          lastDeployedAt: now,
+          assignedTo: { id: assignee.id, username: assignee.username, displayName: assignee.displayName },
+          issuedHostId: host.id,
+        };
+        if (existing) {
+          existing.status = "retired";
+          existing.hosts = [];
+        }
+        mockManagedSshKeys = [key, ...mockManagedSshKeys];
+        const report = mockSshKeyReport(host);
+        report.keys.push({
+          fingerprint: key.fingerprint,
+          type: key.algorithm,
+          comment: key.comment,
+          publicKey: key.publicKey,
+          source: "managed",
+          keyId: key.id,
+          owner: key.owner,
+          firstSeenAt: now,
+        });
+        report.exists = true;
+        report.mode = "600";
+        report.managed += 1;
+        report.scannedAt = now;
+        mockSshEvents.unshift({ at: now, kind: "issue", ok: true, message: `Issued ${label} to @${assignee.username} on ${host.label}` });
+        emit({ type: "sshkeys", sshKeys: mockSshKeyOverview() });
+        return {
+          key,
+          privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nmock-member-key-material\n-----END OPENSSH PRIVATE KEY-----",
+          publicKey: key.publicKey,
+          fingerprint: key.fingerprint,
+          host: { id: host.id, label: host.label, host: host.host, port: host.port, username: host.username },
+          path: report.path,
+          connect: `ssh -i nexus-${assignee.username}-${host.label}.key -p ${host.port} ${host.username}@${host.host}`,
+        };
+      },
+      mine: async () => mockManagedSshKeys.filter((key) => key.status === "active" && key.assignedTo),
       deploy: async (hostId, keyId): Promise<SshKeyDeployResult> => {
         const key = mockManagedSshKeys.find((entry) => entry.id === keyId);
         const host = sshHosts.find((entry) => entry.id === hostId);

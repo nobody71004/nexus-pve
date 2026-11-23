@@ -18,6 +18,8 @@ import type {
   VmAction,
   VmType,
   TeamAuditFilter,
+  TeamBoardTaskInput,
+  TeamBoardTaskPatch,
   TeamSyncConfigInput,
 } from "../shared/types";
 
@@ -47,8 +49,26 @@ const bridge: NexusBridge = {
     deleteUser: (id: string) => ipcRenderer.invoke(IPC.teamDeleteUser, id),
     setMachineLinks: (machineId: string, userIds: string[]) =>
       ipcRenderer.invoke(IPC.teamSetMachineLinks, machineId, userIds),
+    setUserMachineLinks: (userId: string, machineIds: string[]) =>
+      ipcRenderer.invoke(IPC.teamSetUserMachineLinks, userId, machineIds),
     audit: (filter?: TeamAuditFilter) => ipcRenderer.invoke(IPC.teamAudit, filter),
     exportAudit: (filter?: TeamAuditFilter) => ipcRenderer.invoke(IPC.teamAuditExport, filter),
+    chat: () => ipcRenderer.invoke(IPC.teamChat),
+    postMessage: (body: string) => ipcRenderer.invoke(IPC.teamChatPost, body),
+    board: () => ipcRenderer.invoke(IPC.teamBoard),
+    createBoardList: (title: string) => ipcRenderer.invoke(IPC.teamBoardListCreate, title),
+    deleteBoardList: (id: string) => ipcRenderer.invoke(IPC.teamBoardListDelete, id),
+    createBoardTask: (input: TeamBoardTaskInput) => ipcRenderer.invoke(IPC.teamBoardTaskCreate, input),
+    updateBoardTask: (id: string, patch: TeamBoardTaskPatch) =>
+      ipcRenderer.invoke(IPC.teamBoardTaskUpdate, id, patch),
+    deleteBoardTask: (id: string) => ipcRenderer.invoke(IPC.teamBoardTaskDelete, id),
+  },
+  teamFiles: {
+    overview: () => ipcRenderer.invoke(IPC.teamFilesOverview),
+    upload: () => ipcRenderer.invoke(IPC.teamFilesUpload),
+    download: (id: string, name: string) => ipcRenderer.invoke(IPC.teamFilesDownload, id, name),
+    serverScript: () => ipcRenderer.invoke(IPC.teamFilesServerScript),
+    remove: (id: string) => ipcRenderer.invoke(IPC.teamFilesRemove, id),
   },
   teamSync: {
     status: () => ipcRenderer.invoke(IPC.teamSyncStatus),
@@ -121,6 +141,9 @@ const bridge: NexusBridge = {
   sshkeys: {
     overview: () => ipcRenderer.invoke(IPC.sshKeysOverview),
     generate: (input: { label: string; owner?: string }) => ipcRenderer.invoke(IPC.sshKeysGenerate, input),
+    issue: (input: { hostId: string; userId?: string; label?: string; rotate?: boolean }) =>
+      ipcRenderer.invoke(IPC.sshKeysIssue, input),
+    mine: () => ipcRenderer.invoke(IPC.sshKeysMine),
     deploy: (hostId: string, keyId: string) => ipcRenderer.invoke(IPC.sshKeysDeploy, hostId, keyId),
     scan: (hostId: string) => ipcRenderer.invoke(IPC.sshKeysScan, hostId),
     trust: (hostId: string, fingerprints?: string[]) => ipcRenderer.invoke(IPC.sshKeysTrust, hostId, fingerprints),

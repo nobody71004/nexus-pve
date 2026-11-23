@@ -13,7 +13,11 @@ import type {
 } from "./fabric-types";
 import type {
   TeamAuthState,
+  TeamBoard,
+  TeamBoardTaskInput,
+  TeamBoardTaskPatch,
   TeamBootstrapInput,
+  TeamChat,
   TeamLoginInput,
   TeamOverview,
   TeamUser,
@@ -71,7 +75,14 @@ export type { PraetorCheck, PraetorHealth, PraetorHostStatus, PraetorInstallResu
 export type {
   TeamActivityEntry,
   TeamAuthState,
+  TeamBoard,
+  TeamBoardList,
+  TeamBoardTask,
+  TeamBoardTaskInput,
+  TeamBoardTaskPatch,
   TeamBootstrapInput,
+  TeamChat,
+  TeamChatMessage,
   TeamLoginInput,
   TeamMachine,
   TeamOverview,
@@ -523,6 +534,13 @@ export interface SshHostSummary {
 export type SshKeyStatus = "active" | "retired";
 export type SshKeyTrust = "managed" | "trusted" | "unknown";
 
+/** A workspace member who received a personal machine key. */
+export interface SshKeyAssignee {
+  id: string;
+  username: string;
+  displayName: string;
+}
+
 /** Public metadata only. The private half never crosses IPC or MCP. */
 export interface ManagedSshKey {
   id: string;
@@ -537,6 +555,10 @@ export interface ManagedSshKey {
   /** Linux host ids this key was deployed to. */
   hosts: string[];
   lastDeployedAt?: number;
+  /** Present when this key belongs to a member for one specific machine. */
+  assignedTo?: SshKeyAssignee;
+  /** Host the member key was issued for. Member keys are single-machine. */
+  issuedHostId?: string;
 }
 
 export interface AuthorizedSshKey {
@@ -570,7 +592,7 @@ export interface SshKeyHostReport {
 
 export interface SshKeyEvent {
   at: number;
-  kind: "generate" | "deploy" | "scan" | "trust" | "enforce" | "revoke" | "policy" | "error";
+  kind: "generate" | "issue" | "deploy" | "scan" | "trust" | "enforce" | "revoke" | "policy" | "error";
   hostId?: string;
   host?: string;
   ok: boolean;
@@ -596,6 +618,28 @@ export interface SshKeyOverview {
 export interface SshKeyGenerateInput {
   label: string;
   owner?: string;
+}
+
+export interface SshKeyIssueInput {
+  hostId: string;
+  /** Defaults to the signed-in member. Admins may target another member. */
+  userId?: string;
+  label?: string;
+  /** Replace the member's existing key for this machine. */
+  rotate?: boolean;
+}
+
+export interface SshKeyIssueResult {
+  key: ManagedSshKey;
+  /** OpenSSH private key, returned exactly once and never persisted in the renderer. */
+  privateKey: string;
+  publicKey: string;
+  fingerprint: string;
+  host: { id: string; label: string; host: string; port: number; username: string };
+  path: string;
+  /** Ready-to-run client command for direct SSH access. */
+  connect: string;
+  warning?: string;
 }
 
 export interface SshKeyDeployResult {
@@ -976,6 +1020,21 @@ export interface AppSettings {
   gpuAlertOverrides: GpuAlertOverrides;
 }
 
+export interface TeamFileEntry {
+  id: string;
+  name: string;
+  size: number;
+  uploadedBy: string;
+  uploadedAt: number;
+  contentType?: string;
+}
+
+export interface TeamFilesOverview {
+  configured: boolean;
+  endpoint?: string;
+  files: TeamFileEntry[];
+}
+
 export interface NexusBridge {
   app: {
     info(): Promise<AppInfo>;
@@ -1000,8 +1059,27 @@ export interface NexusBridge {
     updateUser(id: string, patch: TeamUserPatch): Promise<TeamOverview>;
     deleteUser(id: string): Promise<TeamOverview>;
     setMachineLinks(machineId: string, userIds: string[]): Promise<TeamOverview>;
+    setUserMachineLinks(userId: string, machineIds: string[]): Promise<TeamOverview>;
     audit(filter?: TeamAuditFilter): Promise<TeamAuditResult>;
     exportAudit(filter?: TeamAuditFilter): Promise<TeamAuditExportResult>;
+    chat(): Promise<TeamChat>;
+    postMessage(body: string): Promise<TeamChat>;
+    board(): Promise<TeamBoard>;
+    createBoardList(title: string): Promise<TeamBoard>;
+    deleteBoardList(id: string): Promise<TeamBoard>;
+    createBoardTask(input: TeamBoardTaskInput): Promise<TeamBoard>;
+    updateBoardTask(id: string, patch: TeamBoardTaskPatch): Promise<TeamBoard>;
+    deleteBoardTask(id: string): Promise<TeamBoard>;
+  };
+  teamFiles: {
+    overview(): Promise<TeamFilesOverview>;
+    /** Opens the native picker and streams the selected file to the team relay. */
+    upload(): Promise<TeamFilesOverview | null>;
+    /** Opens the native save picker and streams the shared file to disk. */
+    download(id: string, name: string): Promise<string | null>;
+    /** Saves the self-hosted relay script for installation on a server. */
+    serverScript(): Promise<string | null>;
+    remove(id: string): Promise<TeamFilesOverview>;
   };
   teamSync: {
     status(): Promise<TeamSyncStatus>;
@@ -1068,6 +1146,10 @@ export interface NexusBridge {
   sshkeys: {
     overview(): Promise<SshKeyOverview>;
     generate(input: SshKeyGenerateInput): Promise<SshKeyOverview>;
+    /** Issue a personal single-machine key to the signed-in member. */
+    issue(input: SshKeyIssueInput): Promise<SshKeyIssueResult>;
+    /** Active member keys assigned to the signed-in account. */
+    mine(): Promise<ManagedSshKey[]>;
     deploy(hostId: string, keyId: string): Promise<SshKeyDeployResult>;
     scan(hostId: string): Promise<SshKeyHostReport>;
     trust(hostId: string, fingerprints?: string[]): Promise<SshKeyHostReport>;

@@ -1,4 +1,8 @@
 import type {
+  TeamSyncBoardList,
+  TeamSyncBoardTask,
+  TeamSyncBoardTombstone,
+  TeamSyncChatMessage,
   TeamSyncMachine,
   TeamSyncMachineTombstone,
   TeamSyncSnapshot,
@@ -71,6 +75,62 @@ function mergeTombstones(local: TeamSyncUserTombstone[], remote: TeamSyncUserTom
     .sort((left, right) => right.deletedAt - left.deletedAt);
 }
 
+function mergeChat(local: TeamSyncChatMessage[], remote: TeamSyncChatMessage[]): TeamSyncChatMessage[] {
+  const messages = new Map<string, TeamSyncChatMessage>();
+  for (const message of [...local, ...remote]) {
+    if (!message?.id) continue;
+    if (!messages.has(message.id)) messages.set(message.id, message);
+  }
+  return [...messages.values()].sort((left, right) => left.createdAt - right.createdAt).slice(-500);
+}
+
+function mergeBoardTombstones(
+  local: TeamSyncBoardTombstone[],
+  remote: TeamSyncBoardTombstone[],
+): TeamSyncBoardTombstone[] {
+  const tombstones = new Map<string, number>();
+  for (const tombstone of [...local, ...remote]) {
+    if (!tombstone?.id) continue;
+    tombstones.set(tombstone.id, Math.max(tombstones.get(tombstone.id) ?? 0, Number(tombstone.deletedAt) || 0));
+  }
+  return [...tombstones.entries()]
+    .map(([id, deletedAt]) => ({ id, deletedAt }))
+    .sort((left, right) => right.deletedAt - left.deletedAt);
+}
+
+function mergeBoardLists(
+  local: TeamSyncBoardList[],
+  remote: TeamSyncBoardList[],
+  deleted: Map<string, number>,
+): TeamSyncBoardList[] {
+  const lists = new Map<string, TeamSyncBoardList>();
+  for (const list of [...local, ...remote]) {
+    if (!list?.id) continue;
+    const previous = lists.get(list.id);
+    if (!previous || Number(list.updatedAt) > Number(previous.updatedAt)) lists.set(list.id, list);
+  }
+  return [...lists.values()]
+    .filter((list) => !deleted.has(list.id))
+    .sort((left, right) => left.position - right.position || left.createdAt - right.createdAt);
+}
+
+function mergeBoardTasks(
+  local: TeamSyncBoardTask[],
+  remote: TeamSyncBoardTask[],
+  deleted: Map<string, number>,
+  listIds: Set<string>,
+): TeamSyncBoardTask[] {
+  const tasks = new Map<string, TeamSyncBoardTask>();
+  for (const task of [...local, ...remote]) {
+    if (!task?.id) continue;
+    const previous = tasks.get(task.id);
+    if (!previous || Number(task.updatedAt) > Number(previous.updatedAt)) tasks.set(task.id, task);
+  }
+  return [...tasks.values()]
+    .filter((task) => !deleted.has(task.id) && listIds.has(task.listId))
+    .sort((left, right) => left.createdAt - right.createdAt);
+}
+
 export function mergeTeamSnapshots(local: TeamSyncSnapshot, remote: TeamSyncSnapshot): TeamSyncSnapshot {
   if (local.version !== 1 || remote.version !== 1) throw new Error("Unsupported team sync snapshot version.");
   const tombstones = mergeTombstones(local.userTombstones ?? [], remote.userTombstones ?? []);
@@ -89,6 +149,17 @@ export function mergeTeamSnapshots(local: TeamSyncSnapshot, remote: TeamSyncSnap
     remote.workspaceUpdatedAt > local.workspaceUpdatedAt
       ? { workspaceName: remote.workspaceName, workspaceUpdatedAt: remote.workspaceUpdatedAt }
       : { workspaceName: local.workspaceName, workspaceUpdatedAt: local.workspaceUpdatedAt };
+  const boardListTombstones = mergeBoardTombstones(
+    local.boardListTombstones ?? [],
+    remote.boardListTombstones ?? [],
+  );
+  const boardTaskTombstones = mergeBoardTombstones(
+    local.boardTaskTombstones ?? [],
+    remote.boardTaskTombstones ?? [],
+  );
+  const deletedLists = new Map(boardListTombstones.map((entry) => [entry.id, entry.deletedAt]));
+  const deletedTasks = new Map(boardTaskTombstones.map((entry) => [entry.id, entry.deletedAt]));
+  const boardLists = mergeBoardLists(local.boardLists ?? [], remote.boardLists ?? [], deletedLists);
   return {
     version: 1,
     workspaceName: workspace.workspaceName,
@@ -100,6 +171,16 @@ export function mergeTeamSnapshots(local: TeamSyncSnapshot, remote: TeamSyncSnap
     activity: [...activity.values()].sort((left, right) => right.at - left.at).slice(0, 1_000),
     userTombstones: tombstones,
     machineTombstones,
+    chat: mergeChat(local.chat ?? [], remote.chat ?? []),
+    boardLists,
+    boardTasks: mergeBoardTasks(
+      local.boardTasks ?? [],
+      remote.boardTasks ?? [],
+      deletedTasks,
+      new Set(boardLists.map((list) => list.id)),
+    ),
+    boardListTombstones,
+    boardTaskTombstones,
   };
 }
 
