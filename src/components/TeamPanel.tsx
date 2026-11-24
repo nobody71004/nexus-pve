@@ -989,6 +989,21 @@ function MemberDialog({
   );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [syncEnabled, setSyncEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    let live = true;
+    void bridge.teamSync
+      .status()
+      .then((status) => {
+        if (live) setSyncEnabled(status.enabled);
+      })
+      .catch(() => {
+        if (live) setSyncEnabled(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
   const editingSelf = member?.id === currentUser.id;
   const canSetMachines =
     Boolean(permissions?.manageLinks) &&
@@ -1026,7 +1041,11 @@ function MemberDialog({
         const created = next.users.find((user) => user.username === username.trim().toLowerCase());
         if (created && canSetMachines) next = await saveMachineGrants(created.id);
         onSaved(next);
-        onToast("ok", "Member added", `${displayName.trim()} can now sign in.`);
+        onToast(
+          "ok",
+          "Member added",
+          `Share the Team sync relay URL and token so ${displayName.trim()} can sign in on their computer.`,
+        );
       } else if (member) {
         const patch: TeamUserPatch = { displayName, status };
         if (currentUser.role === "admin" || currentUser.role === "superadmin") patch.role = role;
@@ -1047,7 +1066,11 @@ function MemberDialog({
   return (
     <Modal
       title={mode === "create" ? "Add a workspace member" : `Edit ${member?.displayName ?? "member"}`}
-      subtitle={mode === "create" ? "Accounts are stored in the local SQLite team directory." : "Role and machine access changes are audit-logged."}
+      subtitle={
+        mode === "create"
+          ? "This account works on stations connected to the team relay. Share the relay URL and token with the member."
+          : "Role and machine access changes are audit-logged."
+      }
       onClose={onClose}
       width={580}
       footer={
@@ -1061,6 +1084,15 @@ function MemberDialog({
         </>
       }
     >
+      {mode === "create" && syncEnabled === false ? (
+        <div className="member-sync-warning" role="status">
+          <Icon name="alert" size={14} />
+          <span>
+            Team sync is not connected, so this account can only sign in on this computer. Connect{" "}
+            <strong>Team access → Sync</strong> first if the member uses another computer.
+          </span>
+        </div>
+      ) : null}
       <div className="form-grid">
         <label className="field">
           <span>Username</span>
@@ -1542,6 +1574,7 @@ function SyncPanel({ onToast, onRefreshed }: { onToast: Toast; onRefreshed: () =
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [replaceLocal, setReplaceLocal] = useState(false);
 
   const applyStatus = useCallback((next: TeamSyncStatus) => {
     setStatus(next);
@@ -1581,6 +1614,49 @@ function SyncPanel({ onToast, onRefreshed }: { onToast: Toast; onRefreshed: () =
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       onToast("error", "Sync failed", err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const joinAndReplace = async () => {
+    if (!replaceLocal) return;
+    if (
+      !window.confirm(
+        "Replace this computer's local workspace?\n\nThis deletes local accounts, sessions, team chat and billboard data on this computer, then imports the relay workspace. SSH keys and host credentials are not touched.",
+      )
+    ) {
+      return;
+    }
+    setBusy("join");
+    setError(null);
+    try {
+      const result = await bridge.teamSync.join({
+        endpoint,
+        workspace,
+        deviceName,
+        token,
+        replaceLocal: true,
+      });
+      applyStatus(result.status);
+      setToken("");
+      setReplaceLocal(false);
+      try {
+        sessionStorage.setItem(
+          "nexus.authNotice",
+          "This station now uses the team workspace. Sign in with the account your admin created.",
+        );
+      } catch {
+        /* best effort */
+      }
+      onToast(
+        "ok",
+        "Team workspace joined",
+        `${result.status.counts.users} accounts imported · sign in with the account your admin created.`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      onToast("error", "Could not join the team workspace", err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(null);
     }
@@ -1667,6 +1743,30 @@ function SyncPanel({ onToast, onRefreshed }: { onToast: Toast; onRefreshed: () =
             </button>
             <button className="btn small primary" onClick={() => void connect()} disabled={busy !== null || !endpoint.trim() || !token.trim()}>
               {busy === "connect" ? "Connecting…" : status?.enabled ? "Reconnect & sync" : "Connect workspace"}
+            </button>
+          </div>
+          <div className="sync-join">
+            <label className="sync-replace">
+              <input
+                type="checkbox"
+                checked={replaceLocal}
+                onChange={(event) => setReplaceLocal(event.target.checked)}
+                disabled={busy !== null}
+              />
+              <span>
+                <strong>Replace this computer's workspace</strong>
+                <em>
+                  Use this when the station accidentally created its own workspace. It deletes local accounts, sessions,
+                  chat and billboard data here, then imports the relay copy. SSH keys and host credentials are not touched.
+                </em>
+              </span>
+            </label>
+            <button
+              className="btn small ghost danger"
+              onClick={() => void joinAndReplace()}
+              disabled={busy !== null || !replaceLocal || !endpoint.trim() || !token.trim()}
+            >
+              {busy === "join" ? "Joining…" : "Join & replace this station"}
             </button>
           </div>
         </div>

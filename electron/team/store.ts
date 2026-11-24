@@ -559,6 +559,49 @@ export class TeamService {
     return this.count("SELECT COUNT(*) AS count FROM users") > 0;
   }
 
+  /**
+   * Discard this computer's local team directory. Used only when an operator
+   * explicitly adopts an existing relay workspace after accidentally creating
+   * a standalone one. SSH keys and host credentials live outside this database
+   * and are not touched.
+   */
+  replaceDirectory(): void {
+    this.clearSession();
+    this.transaction(() => {
+      this.run("DELETE FROM sessions");
+      this.run("DELETE FROM machine_links");
+      this.run("DELETE FROM users");
+      this.run("DELETE FROM machines");
+      this.run("DELETE FROM activity");
+      this.run("DELETE FROM team_chat_messages");
+      this.run("DELETE FROM team_board_tasks");
+      this.run("DELETE FROM team_board_lists");
+      this.run("DELETE FROM sync_user_tombstones");
+      this.run("DELETE FROM sync_machine_tombstones");
+      this.run("DELETE FROM board_list_tombstones");
+      this.run("DELETE FROM board_task_tombstones");
+      this.run("DELETE FROM login_throttle");
+      // Keep schema_version so the next launch does not run a data migration
+      // against the freshly imported relay directory.
+      this.run("DELETE FROM settings WHERE key IN ('workspace_name', 'workspace_updated_at')");
+    });
+  }
+
+  /**
+   * Adopt the relay's workspace identity before applying its snapshot so a
+   * fresh station's default name and timestamp cannot overwrite the team's.
+   */
+  adoptWorkspaceMetadata(name: string, updatedAt: number): void {
+    const workspaceName = (name ?? "").trim() || "Nexus Operations";
+    const workspaceUpdatedAt = Number(updatedAt) > 0 ? Number(updatedAt) : 1;
+    this.transaction(() => {
+      this.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('workspace_name', ?)", [workspaceName]);
+      this.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('workspace_updated_at', ?)", [
+        workspaceUpdatedAt,
+      ]);
+    });
+  }
+
   /** Extend only the current session; a member cannot revive another device. */
   refreshSession(): TeamAuthState {
     const state = this.status();
@@ -1816,6 +1859,7 @@ export class TeamService {
     // Repair the invariant locally instead of leaving the workspace unable to
     // appoint a super admin.
     this.ensureSuperAdminPresent();
+    this.ensureDefaultBoardLists();
   }
 
   private listUsers(actor: TeamUser): TeamUser[] {

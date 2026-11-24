@@ -18,6 +18,7 @@ import type {
   TeamBoardTaskPatch,
   TeamLoginInput,
   TeamSyncConfigInput,
+  TeamSyncJoinInput,
   TeamUserInput,
   TeamUserPatch,
   VmAction,
@@ -291,6 +292,14 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
   ipcMain.handle(IPC.teamSyncConfigure, (_event, input: TeamSyncConfigInput) => {
     allowSyncManagement();
     return teamSync.configure(input ?? ({} as TeamSyncConfigInput));
+  });
+  ipcMain.handle(IPC.teamSyncPreview, (_event, input: TeamSyncConfigInput) => {
+    allowSyncManagement();
+    return teamSync.preview(input ?? ({} as TeamSyncConfigInput));
+  });
+  ipcMain.handle(IPC.teamSyncJoin, (_event, input: TeamSyncJoinInput) => {
+    allowSyncManagement();
+    return teamSync.join(input ?? ({} as TeamSyncJoinInput));
   });
   ipcMain.handle(IPC.teamSyncNow, () => {
     allowSyncManagement();

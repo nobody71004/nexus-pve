@@ -33,6 +33,8 @@ export const IPC = {
   teamFilesRemove: "nexus:team-files-remove",
   teamSyncStatus: "nexus:team-sync-status",
   teamSyncConfigure: "nexus:team-sync-configure",
+  teamSyncPreview: "nexus:team-sync-preview",
+  teamSyncJoin: "nexus:team-sync-join",
   teamSyncNow: "nexus:team-sync-now",
   teamSyncDisable: "nexus:team-sync-disable",
   hostsList: "nexus:hosts-list",

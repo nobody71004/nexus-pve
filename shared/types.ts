@@ -29,6 +29,8 @@ import type {
   TeamAuditFilter,
   TeamAuditResult,
   TeamSyncConfigInput,
+  TeamSyncJoinInput,
+  TeamSyncPreview,
   TeamSyncRunResult,
   TeamSyncStatus,
 } from "./team-sync";
@@ -100,8 +102,11 @@ export type {
   TeamAuditResult,
   TeamAuditTarget,
   TeamSyncConfigInput,
+  TeamSyncJoinInput,
   TeamSyncMachine,
   TeamSyncPhase,
+  TeamSyncPreview,
+  TeamSyncPreviewUser,
   TeamSyncRemoteState,
   TeamSyncRunResult,
   TeamSyncSnapshot,
@@ -1084,6 +1089,8 @@ export interface NexusBridge {
   teamSync: {
     status(): Promise<TeamSyncStatus>;
     configure(input: TeamSyncConfigInput): Promise<TeamSyncRunResult>;
+    preview(input: TeamSyncConfigInput): Promise<TeamSyncPreview>;
+    join(input: TeamSyncJoinInput): Promise<TeamSyncRunResult>;
     now(): Promise<TeamSyncRunResult>;
     disable(): Promise<TeamSyncStatus>;
   };

@@ -126,6 +126,28 @@ export interface TeamSyncConfigInput {
   deviceName?: string;
 }
 
+export interface TeamSyncJoinInput extends TeamSyncConfigInput {
+  /** Discard this computer's standalone workspace before importing the relay copy. */
+  replaceLocal?: boolean;
+}
+
+export interface TeamSyncPreviewUser {
+  username: string;
+  displayName: string;
+  role: TeamRole;
+  status: TeamStatus;
+}
+
+/** Read-only view of the relay directory before a new station adopts it. */
+export interface TeamSyncPreview {
+  endpoint: string;
+  workspace: string;
+  workspaceName: string;
+  revision: number;
+  users: TeamSyncPreviewUser[];
+  machines: number;
+}
+
 export interface TeamSyncRunResult {
   status: TeamSyncStatus;
   pulled: number;

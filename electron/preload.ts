@@ -21,6 +21,7 @@ import type {
   TeamBoardTaskInput,
   TeamBoardTaskPatch,
   TeamSyncConfigInput,
+  TeamSyncJoinInput,
 } from "../shared/types";
 
 const bridge: NexusBridge = {
@@ -73,6 +74,8 @@ const bridge: NexusBridge = {
   teamSync: {
     status: () => ipcRenderer.invoke(IPC.teamSyncStatus),
     configure: (input: TeamSyncConfigInput) => ipcRenderer.invoke(IPC.teamSyncConfigure, input),
+    preview: (input: TeamSyncConfigInput) => ipcRenderer.invoke(IPC.teamSyncPreview, input),
+    join: (input: TeamSyncJoinInput) => ipcRenderer.invoke(IPC.teamSyncJoin, input),
     now: () => ipcRenderer.invoke(IPC.teamSyncNow),
     disable: () => ipcRenderer.invoke(IPC.teamSyncDisable),
   },

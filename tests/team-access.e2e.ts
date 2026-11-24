@@ -317,6 +317,132 @@ test("team access survives create, grant, member sign-in, revoke and two-device 
   }
 });
 
+test("a new station joins the relay directory and replaces an accidental local workspace", { timeout: 90_000 }, async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nexus-team-join-e2e-"));
+  const previousHome = process.env.NEXUS_PVE_HOME;
+  let relay: RelayHandle | undefined;
+  let teamA: TeamService | undefined;
+  let teamB: TeamService | undefined;
+  let teamC: TeamService | undefined;
+  let syncA: TeamSyncService | undefined;
+  let syncB: TeamSyncService | undefined;
+  let syncC: TeamSyncService | undefined;
+
+  try {
+    relay = await startRelay(tempRoot);
+    teamA = await openTeam(path.join(tempRoot, "owner-station"));
+    await teamA.bootstrap({ username: "owner", displayName: "Morgan Lee", password: PASSWORD });
+    teamA.syncMachines([sshHost("edge-a", "Edge relay", EDGE_HOST), sshHost("gpu-a", "GPU worker", GPU_HOST)]);
+    teamA.createUser({ username: "alice", displayName: "Alice Rivera", role: "user", password: PASSWORD });
+
+    // The fresh station asks the relay before creating any local account.
+    teamB = await openTeam(path.join(tempRoot, "fresh-station"));
+    syncB = new TeamSyncService(teamB, () => undefined, path.join(tempRoot, "sync-fresh.json"));
+    const emptyPreview = await syncB.preview({
+      endpoint: relay.url,
+      token: TOKEN,
+      workspace: "team-join-e2e",
+      deviceName: "fresh-station",
+    });
+    assert.equal(emptyPreview.users.length, 0);
+    await assert.rejects(
+      syncB.join({ endpoint: relay.url, token: TOKEN, workspace: "team-join-e2e", deviceName: "fresh-station" }),
+      /no team workspace yet/,
+    );
+
+    syncA = new TeamSyncService(teamA, () => undefined, path.join(tempRoot, "sync-owner.json"));
+    const published = await syncA.configure({
+      endpoint: relay.url,
+      token: TOKEN,
+      workspace: "team-join-e2e",
+      deviceName: "owner-station",
+    });
+    assert.equal(published.status.phase, "online");
+
+    const preview = await syncB.preview({
+      endpoint: relay.url,
+      token: TOKEN,
+      workspace: "team-join-e2e",
+      deviceName: "fresh-station",
+    });
+    assert.equal(preview.workspaceName, "Nexus Operations");
+    assert.deepEqual(preview.users.map((user) => user.username), ["alice", "owner"]);
+    assert.equal(preview.machines, 2);
+    assert.equal(teamB.hasUsers(), false, "preview does not create a local account");
+
+    const joined = await syncB.join({
+      endpoint: relay.url,
+      token: TOKEN,
+      workspace: "team-join-e2e",
+      deviceName: "fresh-station",
+    });
+    assert.equal(joined.status.phase, "online");
+    assert.equal(joined.pushed, 0, "joining never publishes the local directory");
+    assert.equal(joined.status.counts.users, 2);
+    assert.equal(joined.status.counts.machines, 2);
+    assert.equal(teamB.status().initialized, true);
+    assert.equal(teamB.status().user, null, "the joined station must sign in with the invited account");
+    const aliceOnB = await teamB.login({ username: "alice", password: PASSWORD });
+    assert.equal(aliceOnB.role, "user");
+    await teamB.logout();
+
+    // A station that already became its own owner must opt into replacement.
+    teamC = await openTeam(path.join(tempRoot, "accidental-station"));
+    await teamC.bootstrap({ username: "lori", displayName: "Lori Lane", password: PASSWORD });
+    syncC = new TeamSyncService(teamC, () => undefined, path.join(tempRoot, "sync-accidental.json"));
+    await assert.rejects(
+      syncC.join({ endpoint: relay.url, token: TOKEN, workspace: "team-join-e2e", deviceName: "accidental-station" }),
+      /already has a local workspace/,
+    );
+
+    const replaced = await syncC.join({
+      endpoint: relay.url,
+      token: TOKEN,
+      workspace: "team-join-e2e",
+      deviceName: "accidental-station",
+      replaceLocal: true,
+    });
+    assert.equal(replaced.status.phase, "online");
+    assert.equal(replaced.status.counts.users, 2);
+    await assert.rejects(teamC.login({ username: "lori", password: PASSWORD }), /Invalid username or password/);
+    const aliceOnC = await teamC.login({ username: "alice", password: PASSWORD });
+    assert.equal(aliceOnC.role, "user");
+    await teamC.logout();
+
+    // The accidental local owner never reached the shared relay.
+    await syncA.syncNow();
+    assert.deepEqual(
+      teamA.overview().users.map((user) => user.username),
+      ["owner", "alice"],
+      "the relay directory still contains only the real team accounts",
+    );
+  } finally {
+    for (const service of [syncA, syncB, syncC]) {
+      try {
+        service?.close();
+      } catch {
+        /* best effort */
+      }
+    }
+    for (const service of [teamA, teamB, teamC]) {
+      try {
+        service?.close();
+      } catch {
+        /* best effort */
+      }
+    }
+    if (relay) {
+      try {
+        await stopRelay(relay);
+      } catch {
+        /* best effort */
+      }
+    }
+    restoreHome(previousHome);
+    fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
+});
+
 test("team changes revoke only keys whose member grant disappeared", { timeout: 60_000 }, async () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nexus-team-key-revoke-e2e-"));
   const previousHome = process.env.NEXUS_PVE_HOME;

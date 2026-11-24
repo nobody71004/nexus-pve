@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="License: GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-2ea44f?style=flat-square" /></a>
   <img alt="Platform: Windows 10/11 x64" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0a84ff?style=flat-square" />
   <img alt="Edge runtime: Python 3.10+ and nftables" src="https://img.shields.io/badge/edge-Python%203.10%2B%20%2B%20nftables-7c5cff?style=flat-square" />
-  <img alt="Version 1.0.23" src="https://img.shields.io/badge/version-1.0.23-3ddc97?style=flat-square" />
+  <img alt="Version 1.0.24" src="https://img.shields.io/badge/version-1.0.24-3ddc97?style=flat-square" />
 </p>
 
 > **Documentation image:** the hero uses documentation addresses from the RFC 5737 ranges. It does not show a live edge address. The project ships with fictional demo data and no credentials, private keys, or real infrastructure addresses.
@@ -90,9 +90,19 @@ The result is a console for a small but real fleet: a Proxmox cluster, a few Lin
 
 ### Portable build
 
-Prebuilt portable artifacts are published on the repository's [Releases](../../releases) page. The latest build is [`v1.0.23`](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.23). The current source tree is `1.0.23`.
+Prebuilt portable artifacts are published on the repository's [Releases](../../releases) page. The latest build is [`v1.0.24`](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.24). The current source tree is `1.0.24`.
 
-The portable target is Windows 10/11 x64. It requires no installer and no system Node.js runtime. Verify the published download against the SHA-256 in the release notes; a local checkout that includes `NexusPVE-1.0.23-portable.exe` should match the published v1.0.23 hash.
+The portable target is Windows 10/11 x64. It requires no installer and no system Node.js runtime. Verify the published download against the SHA-256 in the release notes; a local checkout that includes `NexusPVE-1.0.24-portable.exe` should match the published v1.0.24 hash.
+
+### Release 1.0.24
+
+`1.0.24` fixes team onboarding on a second computer so an invited member can join the owner's workspace before signing in, instead of accidentally creating a new local owner account.
+
+- **Join an existing team** — The first-run screen now offers **Join an existing team** alongside **Create a new workspace**. Joining reads the relay directory first, previews the workspace name, accounts and machine count, then imports it and sends the operator to sign in with the account the admin created. An empty relay is refused rather than silently becoming a separate workspace.
+- **Safe replacement for accidental workspaces** — **Team access → Sync** gains **Replace this computer's workspace** / **Join & replace this station**. It discards only the local team directory, imports the relay copy, and leaves SSH keys and host credentials untouched. Joining never publishes the local directory first, so an accidental local super admin cannot enter the shared relay.
+- **Clearer invitation flow** — The member dialog warns when Team sync is not connected, and the post-create message tells the admin to share the relay URL and token. The README documents the cross-computer join procedure and the SSH-key boundary.
+- **Verification** — Typecheck and the production build pass. `npm test` passes 4 edge tests, 6 team-access tests (including the new fresh-station join and replacement test), 1 team-panel focus test and 1 team-files relay test. The packaged smoke test passes 13/13 checks with 84 MCP tools.
+- **Asset** — [`NexusPVE-1.0.24-portable.exe`](https://github.com/nobody71004/nexus-pve/releases/download/v1.0.24/NexusPVE-1.0.24-portable.exe) (117,593,473 bytes), SHA-256 `1d06fb1525f8197e52709de0ab7e4846b43527a43b15768b447ba5db6c4d3724`. It is unsigned.
 
 ### Release 1.0.23
 
@@ -273,6 +283,25 @@ In Nexus, open **Team access → Sync**, enter the relay URL (`https://sync.exam
 **Shared files**. Active members on that relay see the same library. The uploader or an admin can remove an item; downloads
 and uploads are authenticated with the workspace token. Use a dedicated token for the workspace and rotate it if a device
 is lost.
+
+#### Join the team from another computer
+
+Accounts live in each station's workspace database and travel through the relay; a username and password alone cannot
+reach a computer that has never connected to it.
+
+1. On the owner's station, connect **Team access → Sync** and share the relay URL, workspace name and token with the
+   member.
+2. On the new station's first screen choose **Join an existing team**, enter those three values and select **Find team
+   workspace**. Nexus shows the team name, accounts and machine count before anything is imported.
+3. Select **Join this workspace**, then sign in with the account the owner created.
+
+Joining imports accounts, roles, machine grants, chat and the billboard. It does not import SSH keys or stored host
+passwords; an admin can issue a per-member machine key from **SSH keys → Issue a machine key to a member**, or the
+member can add their own credentials on that station.
+
+If a station already created its own workspace by mistake, sign in to it, open **Team access → Sync**, enter the relay
+details, tick **Replace this computer's workspace** and choose **Join & replace this station**. Only that station's local
+team directory is replaced; SSH keys and host credentials are left alone.
 
 ### Command Deck
 

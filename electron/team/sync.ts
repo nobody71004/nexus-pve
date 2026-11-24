@@ -2,7 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import type {
   TeamSyncConfigInput,
+  TeamSyncJoinInput,
   TeamSyncPhase,
+  TeamSyncPreview,
   TeamSyncRemoteState,
   TeamSyncRunResult,
   TeamSyncSnapshot,
@@ -91,7 +93,7 @@ export class TeamSyncService {
     return this.config ? { endpoint: this.config.endpoint, token: this.config.token } : null;
   }
 
-  async configure(input: TeamSyncConfigInput): Promise<TeamSyncRunResult> {
+  private candidate(input: TeamSyncConfigInput): StoredSyncConfig {
     const nextEndpoint = endpoint(input.endpoint ?? "");
     const token = (input.token ?? "").trim();
     if (token.length < 16) throw new Error("The sync token must be at least 16 characters.");
@@ -99,13 +101,17 @@ export class TeamSyncService {
       throw new Error("Workspace names use letters, numbers, dots, dashes or underscores.");
     }
     const deviceName = (input.deviceName || "Nexus device").trim().slice(0, 48);
-    this.config = {
+    return {
       version: CONFIG_VERSION,
       endpoint: nextEndpoint,
       token,
       workspace: (input.workspace || "default").trim(),
       deviceName: deviceName || "Nexus device",
     };
+  }
+
+  async configure(input: TeamSyncConfigInput): Promise<TeamSyncRunResult> {
+    this.config = this.candidate(input);
     this.revision = 0;
     this.error = undefined;
     this.phase = "idle";
@@ -113,6 +119,80 @@ export class TeamSyncService {
     this.startTimer();
     this.emit();
     return this.syncNow();
+  }
+
+  /**
+   * Read the relay copy without changing this station's sync config. The
+   * first-run join uses this to prove the relay already has a team workspace
+   * before the station adopts its directory.
+   */
+  async preview(input: TeamSyncConfigInput): Promise<TeamSyncPreview> {
+    const config = this.candidate(input);
+    const remote = await this.getRemote(config);
+    const snapshot = remote.snapshot;
+    return {
+      endpoint: config.endpoint,
+      workspace: config.workspace,
+      workspaceName: snapshot?.workspaceName?.trim() || config.workspace,
+      revision: remote.revision,
+      users: (snapshot?.users ?? [])
+        .map((user) => ({
+          username: user.username,
+          displayName: user.displayName,
+          role: user.role,
+          status: user.status,
+        }))
+        .sort((left, right) => left.username.localeCompare(right.username)),
+      machines: snapshot?.machines?.length ?? 0,
+    };
+  }
+
+  /**
+   * Adopt an existing team workspace on a station that has never synced.
+   * Unlike configure(), this never publishes the local directory first: an
+   * accidental local owner account must not be pushed into the shared relay.
+   * With replaceLocal, the local directory is discarded and rebuilt from the
+   * relay copy; SSH keys and host credentials live outside this database.
+   */
+  async join(input: TeamSyncJoinInput): Promise<TeamSyncRunResult> {
+    this.stopTimer();
+    if (this.running) await this.running.catch(() => undefined);
+    const config = this.candidate(input);
+    const remote = await this.getRemote(config);
+    const snapshot = remote.snapshot;
+    if (!snapshot || snapshot.version !== 1 || !Array.isArray(snapshot.users) || snapshot.users.length === 0) {
+      throw new Error(
+        "That relay has no team workspace yet. Ask the workspace owner to connect their Nexus station first, or create a new workspace on this computer.",
+      );
+    }
+    if (this.team.hasUsers() && input.replaceLocal !== true) {
+      throw new Error(
+        "This computer already has a local workspace. Confirm “Replace this computer's workspace” to join the team, or ask an admin to sign in and connect it.",
+      );
+    }
+
+    if (input.replaceLocal === true) this.team.replaceDirectory();
+    this.team.adoptWorkspaceMetadata(snapshot.workspaceName, snapshot.workspaceUpdatedAt);
+    this.team.applySyncSnapshot(snapshot);
+    await this.afterApply?.();
+
+    const now = Date.now();
+    this.config = config;
+    this.revision = remote.revision;
+    this.lastSyncAt = now;
+    this.lastAttemptAt = now;
+    this.error = undefined;
+    this.phase = "online";
+    this.save();
+    this.startTimer();
+    const status = this.status();
+    this.emit(status);
+    return {
+      status,
+      pulled: snapshot.users.length + (snapshot.machines?.length ?? 0),
+      pushed: 0,
+      changed: true,
+    };
   }
 
   async syncNow(): Promise<TeamSyncRunResult> {
@@ -230,10 +310,10 @@ export class TeamSyncService {
     throw new Error("The sync relay did not accept the workspace update.");
   }
 
-  private async getRemote(): Promise<TeamSyncRemoteState> {
-    const response = await fetch(`${this.config!.endpoint}/v1/state`, {
+  private async getRemote(config: StoredSyncConfig = this.config!): Promise<TeamSyncRemoteState> {
+    const response = await fetch(`${config.endpoint}/v1/state`, {
       method: "GET",
-      headers: { Authorization: `Bearer ${this.config!.token}`, Accept: "application/json" },
+      headers: { Authorization: `Bearer ${config.token}`, Accept: "application/json" },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     const body = (await response.json().catch(() => ({}))) as Partial<TeamSyncRemoteState> & { error?: string };

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { TeamBootstrapInput, TeamLoginInput, TeamUser } from "../../shared/team-types";
+import type { TeamSyncPreview } from "../../shared/team-sync";
 import { bridge } from "../lib/bridge";
 import { Backdrop } from "./Backdrop";
 import { Icon } from "./Icon";
@@ -15,21 +16,38 @@ export function AuthScreen({
   onWorkspaceChanged: () => void;
   reduced: boolean;
 }) {
+  const [entry, setEntry] = useState<"create" | "join">("create");
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [joinOpen, setJoinOpen] = useState(false);
   const [joinEndpoint, setJoinEndpoint] = useState("");
   const [joinWorkspace, setJoinWorkspace] = useState("default");
   const [joinToken, setJoinToken] = useState("");
+  const [joinPreview, setJoinPreview] = useState<TeamSyncPreview | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
-  const [joinNotice, setJoinNotice] = useState<string | null>(null);
+  const [joinNotice, setJoinNotice] = useState<string | null>(() => {
+    try {
+      const notice = sessionStorage.getItem("nexus.authNotice");
+      if (notice) sessionStorage.removeItem("nexus.authNotice");
+      return notice;
+    } catch {
+      return null;
+    }
+  });
   const [joinBusy, setJoinBusy] = useState(false);
 
   const setup = !initialized;
+  const joining = setup && entry === "join";
+
+  const switchEntry = (next: "create" | "join") => {
+    setEntry(next);
+    setError(null);
+    setJoinError(null);
+    setJoinPreview(null);
+  };
 
   const submit = async () => {
     setError(null);
@@ -67,7 +85,7 @@ export function AuthScreen({
     }
   };
 
-  const join = async () => {
+  const findWorkspace = async () => {
     setJoinError(null);
     setJoinNotice(null);
     if (!joinEndpoint.trim() || !joinToken.trim()) {
@@ -76,14 +94,45 @@ export function AuthScreen({
     }
     setJoinBusy(true);
     try {
-      await bridge.teamSync.configure({
+      const preview = await bridge.teamSync.preview({
+        endpoint: joinEndpoint.trim(),
+        workspace: joinWorkspace.trim() || "default",
+        token: joinToken.trim(),
+        deviceName: "Nexus desktop",
+      });
+      if (preview.users.length === 0) {
+        setJoinPreview(null);
+        setJoinError(
+          "This relay has no team workspace yet. Ask the workspace owner to connect their Nexus station first, or create a new workspace on this computer.",
+        );
+        return;
+      }
+      setJoinPreview(preview);
+      setJoinWorkspace(preview.workspace);
+    } catch (err) {
+      setJoinPreview(null);
+      setJoinError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setJoinBusy(false);
+    }
+  };
+
+  const joinTeam = async () => {
+    if (!joinPreview) return;
+    setJoinError(null);
+    setJoinBusy(true);
+    try {
+      const result = await bridge.teamSync.join({
         endpoint: joinEndpoint.trim(),
         workspace: joinWorkspace.trim() || "default",
         token: joinToken.trim(),
         deviceName: "Nexus desktop",
       });
       setJoinToken("");
-      setJoinNotice("Connected. If this relay already has accounts, sign in with one of them.");
+      setJoinPreview(null);
+      setJoinNotice(
+        `Connected to ${result.status.workspace}. Sign in with the account your workspace admin created for you.`,
+      );
       onWorkspaceChanged();
     } catch (err) {
       setJoinError(err instanceof Error ? err.message : String(err));
@@ -111,7 +160,7 @@ export function AuthScreen({
         </div>
         <span className="auth-bar-state">
           <i className="status-dot connecting" />
-          {setup ? "WORKSPACE NOT INITIALIZED" : "SECURE LOCAL WORKSPACE"}
+          {joining ? "JOIN A TEAM WORKSPACE" : setup ? "WORKSPACE NOT INITIALIZED" : "SECURE LOCAL WORKSPACE"}
         </span>
         <div className="window-controls">
           <button className="win-btn" onClick={() => void bridge.app.window("minimize")} aria-label="Minimize">
@@ -129,145 +178,233 @@ export function AuthScreen({
       <main className="auth-main">
         <section className="auth-card" aria-labelledby="auth-title">
           <span className="auth-glyph">
-            <Icon name={setup ? "users" : "lock"} size={24} />
+            <Icon name={joining ? "link" : setup ? "users" : "lock"} size={24} />
           </span>
-          <span className="eyebrow">{setup ? "FIRST RUN" : "TEAM ACCESS"}</span>
-          <h1 id="auth-title">{setup ? "Create the workspace owner." : "Welcome back."}</h1>
+          <span className="eyebrow">{joining ? "TEAM INVITE" : setup ? "FIRST RUN" : "TEAM ACCESS"}</span>
+          <h1 id="auth-title">
+            {joining ? "Join your team's workspace." : setup ? "Create the workspace owner." : "Welcome back."}
+          </h1>
           <p className="auth-lede">
-            {setup
-              ? "Nexus needs one owner account before it can store members, roles and machine grants. The owner becomes the first Super admin."
-              : "Sign in to the local Nexus workspace. Your role decides which machines and admin tools you can use."}
+            {joining
+              ? "Enter the relay details your workspace admin shared. Nexus pulls the team directory, then you sign in with the account they created for you."
+              : setup
+                ? "Nexus needs one owner account before it can store members, roles and machine grants. The owner becomes the first Super admin."
+                : "Sign in to the team workspace. Your role decides which machines and admin tools you can use."}
           </p>
 
-          <form
-            className="auth-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void submit();
-            }}
-          >
-            <label className="field">
-              <span>Username</span>
-              <input
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                placeholder={setup ? "owner" : "your username"}
-                autoComplete="username"
-                autoFocus
-                disabled={busy}
-                spellCheck={false}
-              />
-            </label>
-            {setup ? (
-              <label className="field">
-                <span>Display name</span>
-                <input
-                  value={displayName}
-                  onChange={(event) => setDisplayName(event.target.value)}
-                  placeholder="Morgan Lee"
-                  autoComplete="name"
-                  disabled={busy}
-                />
-              </label>
-            ) : null}
-            <label className="field">
-              <span>{setup ? "Owner password" : "Password"}</span>
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder={setup ? "At least 8 characters" : "Your password"}
-                autoComplete={setup ? "new-password" : "current-password"}
-                disabled={busy}
-              />
-            </label>
-            {setup ? (
-              <label className="field">
-                <span>Confirm password</span>
-                <input
-                  type="password"
-                  value={confirm}
-                  onChange={(event) => setConfirm(event.target.value)}
-                  placeholder="Repeat the password"
-                  autoComplete="new-password"
-                  disabled={busy}
-                />
-              </label>
-            ) : null}
-
-            {error ? (
-              <div className="auth-error" role="alert">
-                <Icon name="alert" size={14} />
-                <span>{error}</span>
-              </div>
-            ) : null}
-
-            <button className="btn primary auth-submit" type="submit" disabled={busy}>
-              {busy ? (setup ? "Creating workspace…" : "Signing in…") : setup ? "Create workspace" : "Sign in"}
-              <Icon name={setup ? "chevron" : "logout"} size={14} />
-            </button>
-          </form>
-
           {setup ? (
-            <button className="auth-join-toggle" type="button" onClick={() => setJoinOpen((open) => !open)}>
-              <Icon name="plug" size={12} /> {joinOpen ? "Hide sync setup" : "Join a synced workspace"}
-            </button>
-          ) : null}
-
-          {setup && joinOpen ? (
-            <div className="auth-join">
-              <div className="auth-join-head">
-                <strong>Cross-device team sync</strong>
-                <span className="mono">SELF-HOSTED TLS RELAY</span>
-              </div>
-              <p>
-                Enter the relay URL and token your workspace admin shared. Accounts, roles, machine grants and audit
-                events sync. SSH keys and passwords stay on each computer.
-              </p>
-              <div className="form-grid">
-                <label className="field wide">
-                  <span>Relay URL</span>
-                  <input
-                    value={joinEndpoint}
-                    onChange={(event) => setJoinEndpoint(event.target.value)}
-                    placeholder="https://sync.example.com"
-                    disabled={joinBusy}
-                    spellCheck={false}
-                  />
-                </label>
-                <label className="field">
-                  <span>Workspace</span>
-                  <input value={joinWorkspace} onChange={(event) => setJoinWorkspace(event.target.value)} disabled={joinBusy} />
-                </label>
-                <label className="field">
-                  <span>Workspace token</span>
-                  <input
-                    type="password"
-                    value={joinToken}
-                    onChange={(event) => setJoinToken(event.target.value)}
-                    placeholder="Shared at least 16 characters"
-                    autoComplete="off"
-                    disabled={joinBusy}
-                  />
-                </label>
-              </div>
-              {joinError ? <div className="auth-error"><Icon name="alert" size={14} /><span>{joinError}</span></div> : null}
-              {joinNotice ? <p className="auth-join-notice">{joinNotice}</p> : null}
-              <div className="auth-join-actions">
-                <button className="btn small ghost" type="button" onClick={() => setJoinOpen(false)} disabled={joinBusy}>
-                  Cancel
-                </button>
-                <button className="btn small primary" type="button" onClick={() => void join()} disabled={joinBusy}>
-                  {joinBusy ? "Connecting…" : "Connect & sync"}
-                </button>
-              </div>
+            <div className="auth-mode" role="tablist" aria-label="Workspace setup">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={entry === "create"}
+                className={`auth-mode-tab${entry === "create" ? " active" : ""}`}
+                onClick={() => switchEntry("create")}
+                disabled={busy || joinBusy}
+              >
+                Create a new workspace
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={entry === "join"}
+                className={`auth-mode-tab${entry === "join" ? " active" : ""}`}
+                onClick={() => switchEntry("join")}
+                disabled={busy || joinBusy}
+              >
+                Join an existing team
+              </button>
             </div>
           ) : null}
 
-          <p className="auth-footnote">
-            <Icon name="database" size={12} />
-            SQLite-backed local team directory · passwords hashed with scrypt
-          </p>
+          {joining ? (
+            <div className="auth-join">
+              <div className="auth-join-head">
+                <strong>Cross-device team join</strong>
+                <span className="mono">SELF-HOSTED TLS RELAY</span>
+              </div>
+              <p>
+                Use the relay URL, workspace and token your admin set up. Joining pulls the team accounts and machine
+                inventory first, so this computer never starts a separate workspace by mistake.
+              </p>
+              {joinPreview ? (
+                <div className="auth-join-preview">
+                  <div className="auth-join-preview-head">
+                    <div>
+                      <strong>{joinPreview.workspaceName}</strong>
+                      <span className="mono">{joinPreview.workspace}</span>
+                    </div>
+                    <span className="mono">
+                      {joinPreview.users.length} account{joinPreview.users.length === 1 ? "" : "s"} · {joinPreview.machines}{" "}
+                      machine{joinPreview.machines === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <div className="auth-join-users mono">
+                    {joinPreview.users
+                      .slice(0, 8)
+                      .map((user) => `@${user.username}`)
+                      .join(" · ")}
+                    {joinPreview.users.length > 8 ? ` +${joinPreview.users.length - 8}` : ""}
+                  </div>
+                  <div className="auth-join-actions">
+                    <button
+                      className="btn small ghost"
+                      type="button"
+                      onClick={() => setJoinPreview(null)}
+                      disabled={joinBusy}
+                    >
+                      Back
+                    </button>
+                    <button className="btn small primary" type="button" onClick={() => void joinTeam()} disabled={joinBusy}>
+                      {joinBusy ? "Joining…" : "Join this workspace"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="form-grid">
+                    <label className="field wide">
+                      <span>Relay URL</span>
+                      <input
+                        value={joinEndpoint}
+                        onChange={(event) => setJoinEndpoint(event.target.value)}
+                        placeholder="https://sync.example.com"
+                        disabled={joinBusy}
+                        spellCheck={false}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Workspace</span>
+                      <input
+                        value={joinWorkspace}
+                        onChange={(event) => setJoinWorkspace(event.target.value)}
+                        disabled={joinBusy}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Workspace token</span>
+                      <input
+                        type="password"
+                        value={joinToken}
+                        onChange={(event) => setJoinToken(event.target.value)}
+                        placeholder="Shared at least 16 characters"
+                        autoComplete="off"
+                        disabled={joinBusy}
+                      />
+                    </label>
+                  </div>
+                  <div className="auth-join-actions">
+                    <button
+                      className="btn small ghost"
+                      type="button"
+                      onClick={() => switchEntry("create")}
+                      disabled={joinBusy}
+                    >
+                      I am the owner
+                    </button>
+                    <button className="btn small primary" type="button" onClick={() => void findWorkspace()} disabled={joinBusy}>
+                      {joinBusy ? "Looking up…" : "Find team workspace"}
+                    </button>
+                  </div>
+                </>
+              )}
+              {joinError ? (
+                <div className="auth-error">
+                  <Icon name="alert" size={14} />
+                  <span>{joinError}</span>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <>
+              {joinNotice ? (
+                <div className="auth-notice" role="status">
+                  <Icon name="check" size={14} />
+                  <span>{joinNotice}</span>
+                </div>
+              ) : null}
+              <form
+                className="auth-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void submit();
+                }}
+              >
+                <label className="field">
+                  <span>Username</span>
+                  <input
+                    value={username}
+                    onChange={(event) => setUsername(event.target.value)}
+                    placeholder={setup ? "owner" : "your username"}
+                    autoComplete="username"
+                    autoFocus
+                    disabled={busy}
+                    spellCheck={false}
+                  />
+                </label>
+                {setup ? (
+                  <label className="field">
+                    <span>Display name</span>
+                    <input
+                      value={displayName}
+                      onChange={(event) => setDisplayName(event.target.value)}
+                      placeholder="Morgan Lee"
+                      autoComplete="name"
+                      disabled={busy}
+                    />
+                  </label>
+                ) : null}
+                <label className="field">
+                  <span>{setup ? "Owner password" : "Password"}</span>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder={setup ? "At least 8 characters" : "Your password"}
+                    autoComplete={setup ? "new-password" : "current-password"}
+                    disabled={busy}
+                  />
+                </label>
+                {setup ? (
+                  <label className="field">
+                    <span>Confirm password</span>
+                    <input
+                      type="password"
+                      value={confirm}
+                      onChange={(event) => setConfirm(event.target.value)}
+                      placeholder="Repeat the password"
+                      autoComplete="new-password"
+                      disabled={busy}
+                    />
+                  </label>
+                ) : null}
+
+                {error ? (
+                  <div className="auth-error" role="alert">
+                    <Icon name="alert" size={14} />
+                    <span>{error}</span>
+                  </div>
+                ) : null}
+
+                <button className="btn primary auth-submit" type="submit" disabled={busy}>
+                  {busy ? (setup ? "Creating workspace…" : "Signing in…") : setup ? "Create workspace" : "Sign in"}
+                  <Icon name={setup ? "chevron" : "logout"} size={14} />
+                </button>
+              </form>
+
+              {setup ? (
+                <p className="auth-footnote">
+                  <Icon name="link" size={12} />
+                  Invited by a team? Use <strong>Join an existing team</strong> above.
+                </p>
+              ) : (
+                <p className="auth-footnote">
+                  <Icon name="database" size={12} />
+                  SQLite-backed team directory · passwords hashed with scrypt
+                </p>
+              )}
+            </>
+          )}
         </section>
 
         <aside className="auth-aside" aria-label="Workspace capabilities">
@@ -297,19 +434,19 @@ export function AuthScreen({
             </span>
             <div>
               <strong>Remembered locally</strong>
-              <p>Users, sessions, links and audit events persist in the workspace database.</p>
+              <p>Users, sessions, links and audit events persist in the workspace database and sync through your relay.</p>
             </div>
           </div>
           <p className="auth-aside-note">
-            Local SQLite remains the source of truth on each station. A super admin or admin can opt into a self-hosted TLS sync
-            relay so the same team can collaborate from another computer without sharing SSH secrets.
+            A new computer must join the team relay once; the relay carries accounts and machine grants. SSH keys and
+            passwords stay on the computer where they were entered.
           </p>
         </aside>
       </main>
 
       <footer className="auth-footer">
         <span className="mono">NEXUS PVE · TEAM ACCESS</span>
-        <span className="mono">LOCAL SQLITE · OPTIONAL TLS SYNC</span>
+        <span className="mono">{joining ? "TEAM RELAY · ACCOUNTS PULLED FIRST" : "LOCAL SQLITE · OPTIONAL TLS SYNC"}</span>
       </footer>
     </div>
   );

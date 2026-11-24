@@ -1792,6 +1792,34 @@ export function createMockBridge(): NexusBridge {
         };
         return { status: syncStatus, pulled: 0, pushed: 1, changed: true };
       },
+      preview: async (input) => ({
+        endpoint: input.endpoint,
+        workspace: input.workspace || "default",
+        workspaceName: "Nexus Operations",
+        revision: 1,
+        users: mockUsers.map((user) => ({
+          username: user.username,
+          displayName: user.displayName,
+          role: user.role,
+          status: user.status,
+        })),
+        machines: sshHosts.length,
+      }),
+      join: async (input) => {
+        syncStatus = {
+          ...mockSyncStatus(),
+          enabled: true,
+          phase: "online",
+          endpoint: input.endpoint,
+          workspace: input.workspace || "default",
+          deviceName: input.deviceName || "Nexus desktop",
+          tokenSet: true,
+          revision: 1,
+          lastSyncAt: Date.now(),
+          lastAttemptAt: Date.now(),
+        };
+        return { status: syncStatus, pulled: mockUsers.length + sshHosts.length, pushed: 0, changed: true };
+      },
       now: async () => {
         syncStatus = { ...syncStatus, enabled: true, phase: "online", revision: syncStatus.revision + 1, lastSyncAt: Date.now(), lastAttemptAt: Date.now() };
         return { status: syncStatus, pulled: 0, pushed: 0, changed: false };
