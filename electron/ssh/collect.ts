@@ -26,9 +26,9 @@ export function listSshHosts(store: ConfigStore): SshHostSummary[] {
  * enough to prove sshd, auth and shell work, cheap enough to poll alongside the
  * active snapshot. Failures stay per-host so one dead box cannot hide the rest.
  */
-export async function probeSshHealth(store: ConfigStore): Promise<SshHealth[]> {
+export async function probeSshHealth(store: ConfigStore, hostIds?: Set<string>): Promise<SshHealth[]> {
   return Promise.all(
-    store.sshHosts().map(async (stored): Promise<SshHealth> => {
+    store.sshHosts().filter((stored) => !hostIds || hostIds.has(stored.id)).map(async (stored): Promise<SshHealth> => {
       const password = stored.authMode === "password" ? store.sshSecretFor(stored.id) : undefined;
       if (stored.authMode === "password" && !password) {
         return { id: stored.id, health: "offline", latencyMs: 0, error: "stored password is missing" };
@@ -45,8 +45,8 @@ export async function probeSshHealth(store: ConfigStore): Promise<SshHealth[]> {
   );
 }
 
-export function saveSshHost(store: ConfigStore, input: SshHostInput): SshHostSummary {
-  const saved = store.saveSshHost(input);
+export function saveSshHost(store: ConfigStore, input: SshHostInput, ownerId?: string): SshHostSummary {
+  const saved = store.saveSshHost(input, ownerId);
   cache.delete(saved.id);
   gpuCache.delete(saved.id);
   pveTempCache.delete(saved.id);

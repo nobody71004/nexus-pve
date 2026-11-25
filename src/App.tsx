@@ -322,7 +322,15 @@ function Workspace({
   const visibleNav = useMemo(
     () =>
       currentUser.role === "user"
-        ? NAV.filter((item) => item.id === "hosts" || item.id === "network" || item.id === "files" || item.id === "team")
+        ? NAV.filter(
+            (item) =>
+              item.id === "overview" ||
+              item.id === "hosts" ||
+              item.id === "network" ||
+              item.id === "connections" ||
+              item.id === "files" ||
+              item.id === "team",
+          )
         : NAV,
     [currentUser.role],
   );
@@ -1217,7 +1225,7 @@ function Workspace({
               pveNodes={fleetNodes.map(({ host, node }) => ({ endpoint: host.label, node: node.node }))}
               canManage={currentUser.role !== "user"}
             />
-          ) : !activeHostId ? (
+          ) : !activeHostId && tab !== "connections" ? (
             <Panel eyebrow="GET STARTED" title="Connect your first Proxmox endpoint">
               <div className="hero-empty">
                 <span className="hero-glyph">
@@ -1519,6 +1527,7 @@ function Workspace({
               statuses={statuses}
               activeId={activeHostId}
               info={info}
+              canManage={currentUser.role !== "user"}
               onSelect={(id) => {
                 setActiveHostId(id);
                 setTab("overview");

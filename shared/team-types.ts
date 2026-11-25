@@ -15,7 +15,7 @@ export interface TeamUser {
   createdAt: number;
   updatedAt: number;
   lastLoginAt?: number;
-  /** Number of SSH machines explicitly linked to this account. */
+  /** Machines this account can use. Admins and moderators can use every machine. */
   linkedMachines: number;
   /** A live session touched within the last five minutes. */
   online: boolean;
@@ -75,6 +75,12 @@ export interface TeamOverview {
     online: number;
   };
   permissions: TeamPermissions;
+  /**
+   * Set when a local team mutation succeeded but the immediate relay push
+   * failed. The local change is still committed; this carries the relay error
+   * to the operator instead of reporting a clean success.
+   */
+  syncWarning?: string;
 }
 
 export interface TeamAuthState {
@@ -100,6 +106,13 @@ export interface TeamUserInput {
   displayName: string;
   role: TeamRole;
   password: string;
+  /**
+   * Grant every machine currently in the workspace as part of the same
+   * transaction that creates the account. Used by the one-click member flow.
+   */
+  grantAllMachines?: boolean;
+  /** Explicit initial grants when grantAllMachines is not set. */
+  machineIds?: string[];
 }
 
 export interface TeamUserPatch {

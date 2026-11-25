@@ -204,6 +204,17 @@ export class TeamSyncService {
     return this.running;
   }
 
+  /**
+   * Wait out any poll that started earlier, then run one more sync. Sign-in
+   * uses this so it cannot be served by a request that began before a newly
+   * added member was published to the relay.
+   */
+  async syncFresh(): Promise<TeamSyncRunResult> {
+    const inFlight = this.running;
+    if (inFlight) await inFlight.catch(() => undefined);
+    return this.syncNow();
+  }
+
   async disable(): Promise<TeamSyncStatus> {
     this.config = null;
     this.phase = "disabled";

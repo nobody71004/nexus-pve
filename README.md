@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="License: GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-2ea44f?style=flat-square" /></a>
   <img alt="Platform: Windows 10/11 x64" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0a84ff?style=flat-square" />
   <img alt="Edge runtime: Python 3.10+ and nftables" src="https://img.shields.io/badge/edge-Python%203.10%2B%20%2B%20nftables-7c5cff?style=flat-square" />
-  <img alt="Version 1.0.24" src="https://img.shields.io/badge/version-1.0.24-3ddc97?style=flat-square" />
+  <img alt="Version 1.0.26" src="https://img.shields.io/badge/version-1.0.26-3ddc97?style=flat-square" />
 </p>
 
 > **Documentation image:** the hero uses documentation addresses from the RFC 5737 ranges. It does not show a live edge address. The project ships with fictional demo data and no credentials, private keys, or real infrastructure addresses.
@@ -73,7 +73,7 @@ The result is a console for a small but real fleet: a Proxmox cluster, a few Lin
 
 | Area | Implementation |
 | --- | --- |
-| Product | Nexus PVE `1.0.23` |
+| Product | Nexus PVE `1.0.26` |
 | Desktop shell | Electron 45, React 18, TypeScript, Vite |
 | Desktop target | Windows 10/11 x64 portable executable |
 | Proxmox access | HTTPS API with token or password authentication, optional TLS verification |
@@ -90,9 +90,21 @@ The result is a console for a small but real fleet: a Proxmox cluster, a few Lin
 
 ### Portable build
 
-Prebuilt portable artifacts are published on the repository's [Releases](../../releases) page. The latest build is [`v1.0.25`](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.25). The current source tree is `1.0.25`.
+Prebuilt portable artifacts are published on the repository's [Releases](../../releases) page. The latest build is [`v1.0.26`](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.26). The current source tree is `1.0.26`.
 
-The portable target is Windows 10/11 x64. It requires no installer and no system Node.js runtime. Verify the published download against the SHA-256 in the release notes; a local checkout that includes `NexusPVE-1.0.25-portable.exe` should match the published v1.0.25 hash.
+The portable target is Windows 10/11 x64. It requires no installer and no system Node.js runtime. Verify the published download against the SHA-256 in the release notes; a local checkout that includes `NexusPVE-1.0.26-portable.exe` should match the published v1.0.26 hash.
+
+### Release 1.0.26
+
+`1.0.26` makes team access work end to end for standard members: one-click grants, immediate sync, visible relay failures, and member-owned endpoint credentials.
+
+- **One-click member grants** — New standard members start with every current workspace machine selected, and the account plus its machine links are saved atomically. Admins can still choose individual machines.
+- **Visible relay failures** — If the immediate team sync fails, the local account and grants remain, and Team access shows the relay error with an **Open sync** retry path instead of reporting a clean save.
+- **Member-owned endpoint credentials** — Standard members can add granted SSH and Proxmox endpoints to their own station with their own key, password or API token. Shared endpoints appear in the matching tabs, and SSH/VNC and read-only Proxmox views work without sharing the owner's credential.
+- **Immediate sign-in refresh** — Sign-in pulls a guaranteed fresh workspace before validating credentials, even when a background poll is already running, so a member added on another station can sign in and see their machines immediately. Existing local accounts can still sign in if the relay is unreachable.
+- **Role and access fixes** — Member navigation includes Fleet overview and Connections, elevated roles report their effective access to every machine, and SSH keys can be issued for active elevated users. Proxmox mutations remain operator-only.
+- **Verification** — Typecheck, production build, `npm test` (4 edge tests, 11 team-access tests, 1 team-panel test and 1 team-files relay test) and the packaged smoke test (13/13 checks, 84 MCP tools) pass.
+- **Asset** — [`NexusPVE-1.0.26-portable.exe`](https://github.com/nobody71004/nexus-pve/releases/download/v1.0.26/NexusPVE-1.0.26-portable.exe) (117,598,319 bytes), SHA-256 `23febf15f065689a668f48ab2b80c35161e2485113fbefc7e98ceedfe051523e`. It is unsigned.
 
 ### Release 1.0.25
 
@@ -213,7 +225,7 @@ npm run preflight
 npm run package
 ```
 
-Output: `release/NexusPVE-1.0.23-portable.exe`.
+Output: `release/NexusPVE-1.0.26-portable.exe`.
 
 For development:
 

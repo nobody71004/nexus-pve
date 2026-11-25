@@ -90,6 +90,7 @@ export function TeamPanel({
   const [overview, setOverview] = useState<TeamOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [syncWarning, setSyncWarning] = useState<string | null>(null);
   const [tab, setTab] = useState<TeamTab>(currentUser.role === "user" ? "machines" : "members");
   const [memberDialog, setMemberDialog] = useState<{ mode: "create" | "edit"; member?: TeamUser } | null>(null);
   const [adminMachine, setAdminMachine] = useState<TeamMachine | null>(null);
@@ -103,6 +104,7 @@ export function TeamPanel({
   const apply = useCallback(
     (next: TeamOverview) => {
       setOverview(next);
+      if (next.syncWarning) setSyncWarning(next.syncWarning);
       const self = next.users.find((user) => user.id === currentUser.id);
       if (self) onCurrentUserChange(self);
     },
@@ -159,7 +161,10 @@ export function TeamPanel({
 
   useEffect(() => {
     return bridge.onEvent((event) => {
-      if (event.type === "team-sync") void load(true);
+      if (event.type === "team-sync") {
+        if (event.teamSync?.phase === "online") setSyncWarning(null);
+        void load(true);
+      }
     });
   }, [load]);
 
@@ -245,6 +250,21 @@ export function TeamPanel({
           </div>
           <button className="btn small ghost" onClick={() => void load()}>
             Retry
+          </button>
+        </div>
+      ) : null}
+
+      {syncWarning ? (
+        <div className="warn-banner" role="status">
+          <Icon name="alert" size={14} />
+          <span>{syncWarning}</span>
+          {tabs.some((entry) => entry.id === "sync") ? (
+            <button className="btn small ghost" onClick={() => setTab("sync")}>
+              Open sync
+            </button>
+          ) : null}
+          <button className="btn small ghost" onClick={() => setSyncWarning(null)}>
+            Dismiss
           </button>
         </div>
       ) : null}
@@ -997,6 +1017,7 @@ function MemberDialog({
   const [status, setStatus] = useState<TeamStatus>(member?.status ?? "active");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [grantAllMachines, setGrantAllMachines] = useState(mode === "create");
   const [machineIds, setMachineIds] = useState<string[]>(() =>
     member ? machines.filter((machine) => machine.linkedUserIds.includes(member.id)).map((machine) => machine.id) : [],
   );
@@ -1050,15 +1071,32 @@ function MemberDialog({
     try {
       if (mode === "create") {
         const input: TeamUserInput = { username, displayName, role, password };
-        let next = await bridge.team.createUser(input);
-        const created = next.users.find((user) => user.username === username.trim().toLowerCase());
-        if (created && canSetMachines) next = await saveMachineGrants(created.id);
+        if (canSetMachines) {
+          if (grantAllMachines) input.grantAllMachines = true;
+          else input.machineIds = machineIds;
+        }
+        const next = await bridge.team.createUser(input);
         onSaved(next);
-        onToast(
-          "ok",
-          "Member added",
-          `Share the Team sync relay URL and token so ${displayName.trim()} can sign in on their computer.`,
-        );
+        const syncWarning = next.syncWarning;
+        const accessDetail =
+          role !== "user"
+            ? "Every workspace machine is available through their role."
+            : grantAllMachines
+              ? `All ${machines.length} workspace machine${machines.length === 1 ? "" : "s"} granted.`
+              : `${machineIds.length} machine${machineIds.length === 1 ? "" : "s"} granted.`;
+        if (syncWarning) {
+          onToast(
+            "warn",
+            "Member added locally",
+            `${accessDetail} ${syncWarning} Retry from Team access → Sync.`,
+          );
+        } else {
+          onToast(
+            "ok",
+            "Member added",
+            `${accessDetail} Share the Team sync relay URL and token so ${displayName.trim()} can sign in on their computer.`,
+          );
+        }
       } else if (member) {
         const patch: TeamUserPatch = { displayName, status };
         if (currentUser.role === "admin" || currentUser.role === "superadmin") patch.role = role;
@@ -1188,38 +1226,63 @@ function MemberDialog({
           <div className="section-title">
             <h3>Machine access</h3>
             <span className="mono subtle">
-              {machineIds.length} of {machines.length} linked
+              {mode === "create" && grantAllMachines
+                ? `all ${machines.length} selected`
+                : `${machineIds.length} of ${machines.length} linked`}
             </span>
           </div>
           <p className="hint">
-            Standard members only see the SSH machines checked here. Admins and moderators already have access to every
-            machine.
+            {mode === "create"
+              ? "New standard members get every machine currently in the workspace by default. Turn this off to pick individual machines."
+              : "Standard members only see the machines checked here. Admins and moderators already have access to every machine."}
           </p>
           {machines.length === 0 ? (
-            <p className="subtle small">No SSH machines yet. Add one in the SSH inventory first.</p>
+            <p className="subtle small">No machines yet. Add one in the SSH inventory first.</p>
           ) : (
-            <div className="member-picker">
-              {machines.map((machine) => (
-                <label key={machine.id} className={cx("member-pick", machineIds.includes(machine.id) && "checked")}>
+            <>
+              {mode === "create" ? (
+                <label className={cx("member-pick", grantAllMachines && "checked")}>
                   <input
                     type="checkbox"
-                    checked={machineIds.includes(machine.id)}
-                    onChange={() => toggleMachine(machine.id)}
+                    checked={grantAllMachines}
+                    onChange={(event) => setGrantAllMachines(event.target.checked)}
                     disabled={busy}
                   />
-                  <span className="machine-mark" style={{ background: machine.color }} />
+                  <span className="machine-mark" style={{ background: "#6d4dff" }} />
                   <span className="member-pick-copy">
-                    <strong>{machine.label}</strong>
+                    <strong>All workspace machines</strong>
                     <span className="mono">
-                      {machine.kind === "pve"
-                        ? machine.baseUrl
-                        : `${machine.username}@${machine.host}:${machine.port}`}
+                      {machines.length} current machine{machines.length === 1 ? "" : "s"} · granted in the same save
                     </span>
                   </span>
-                  <span className="mono subtle">{machine.linkedUsers.length}</span>
+                  <Chip tone="ok">one-click</Chip>
                 </label>
-              ))}
-            </div>
+              ) : null}
+              {mode === "edit" || !grantAllMachines ? (
+                <div className="member-picker">
+                  {machines.map((machine) => (
+                    <label key={machine.id} className={cx("member-pick", machineIds.includes(machine.id) && "checked")}>
+                      <input
+                        type="checkbox"
+                        checked={machineIds.includes(machine.id)}
+                        onChange={() => toggleMachine(machine.id)}
+                        disabled={busy}
+                      />
+                      <span className="machine-mark" style={{ background: machine.color }} />
+                      <span className="member-pick-copy">
+                        <strong>{machine.label}</strong>
+                        <span className="mono">
+                          {machine.kind === "pve"
+                            ? machine.baseUrl
+                            : `${machine.username}@${machine.host}:${machine.port}`}
+                        </span>
+                      </span>
+                      <span className="mono subtle">{machine.linkedUsers.length}</span>
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+            </>
           )}
         </section>
       ) : member && role !== "user" ? (

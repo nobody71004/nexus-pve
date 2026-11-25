@@ -26,7 +26,7 @@ import type {
 } from "../shared/types";
 import type { TeamService } from "./team/store";
 import type { TeamSyncService } from "./team/sync";
-import { normalizeBaseUrl } from "./config";
+import { normalizeBaseUrl, publicHost } from "./config";
 import { nexusHome } from "./paths";
 import { createSnapshot, deleteSnapshot, rollbackSnapshot } from "./pve/api";
 import { mcpServerPath, type Runtime } from "./agent/runtime";
@@ -46,6 +46,8 @@ import { guardian } from "./security/guardian";
 import { sshKeys } from "./sshkeys/service";
 import { revokeUnauthorizedTeamKeys } from "./team/access-keys";
 import { TeamFilesService } from "./team/files";
+import { loginWithFreshWorkspace } from "./team/login";
+import { publishTeamMutation } from "./team/mutation";
 import { ddos } from "./ddos/service";
 import type { DdosConfig, DdosMode } from "../shared/ddos-types";
 import { relay } from "./relay/service";
@@ -97,6 +99,9 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
       console.error("[nexus] could not reconcile member SSH keys", error);
     }
   };
+  /** Reconcile local keys, then publish immediately and retain any relay error. */
+  const finishTeamMutation = <T extends { syncWarning?: string }>(result: T): Promise<T> =>
+    publishTeamMutation(result, teamSync, revokeTeamKeys);
   const requireOperator = () => {
     const user = team.currentUser();
     if (user.role === "user") throw new Error("Admin or moderator access required.");
@@ -104,8 +109,28 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
   };
   const guardSshHost = (hostId: string) => {
     const user = team.currentUser();
-    if (user.role === "user" && !team.canAccessMachine(user.id, hostId)) {
-      throw new Error("This machine is not linked to your account. Ask an admin for access.");
+    if (user.role === "user") {
+      const local = store.sshHost(hostId);
+      if (!local || local.ownerId !== user.id) {
+        throw new Error("Add this machine to this computer with your own SSH key or password first.");
+      }
+      if (!team.canUseSshEndpoint(user.id, local)) {
+        throw new Error("This machine is not linked to your account. Ask an admin for access.");
+      }
+    }
+    return user;
+  };
+  const guardPveHost = (hostId: string) => {
+    const user = team.currentUser();
+    const local = store.host(hostId);
+    if (!local) throw new Error("Unknown Proxmox endpoint. Refresh Connections and try again.");
+    if (user.role === "user") {
+      if (local.ownerId !== user.id) {
+        throw new Error("Add this Proxmox endpoint to this computer with your own API token first.");
+      }
+      if (!team.canUsePveEndpoint(user.id, local.baseUrl)) {
+        throw new Error("This Proxmox endpoint is not linked to your account. Ask an admin for access.");
+      }
     }
     return user;
   };
@@ -148,7 +173,9 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
   ipcMain.handle(IPC.authBootstrap, (_event, input: TeamBootstrapInput) =>
     team.bootstrap(input ?? ({} as TeamBootstrapInput)),
   );
-  ipcMain.handle(IPC.authLogin, (_event, input: TeamLoginInput) => team.login(input ?? ({} as TeamLoginInput)));
+  ipcMain.handle(IPC.authLogin, (_event, input: TeamLoginInput) =>
+    loginWithFreshWorkspace(team, teamSync, input ?? ({} as TeamLoginInput)),
+  );
   ipcMain.handle(IPC.authLogout, () => team.logout());
   ipcMain.handle(IPC.authRefreshSession, () => team.refreshSession());
   ipcMain.handle(IPC.authChangePassword, (_event, currentPassword: unknown, nextPassword: unknown) =>
@@ -159,25 +186,26 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
     team.syncMachines(listSshHosts(store));
     return team.overview();
   });
-  ipcMain.handle(IPC.teamCreateUser, (_event, input: TeamUserInput) =>
-    team.createUser(input ?? ({} as TeamUserInput)),
-  );
+  ipcMain.handle(IPC.teamCreateUser, async (_event, input: TeamUserInput) => {
+    // Include machines discovered since the dialog opened, not just the list
+    // the renderer saw. "All machines" means the workspace's current set.
+    team.syncMachines(listSshHosts(store));
+    team.syncPveHosts(store.hosts());
+    return finishTeamMutation(team.createUser(input ?? ({} as TeamUserInput)));
+  });
   ipcMain.handle(IPC.teamUpdateUser, async (_event, id: unknown, patch: TeamUserPatch) => {
     const overview = team.updateUser(str(id, "member id"), patch ?? ({} as TeamUserPatch));
-    await revokeTeamKeys();
-    return overview;
+    return finishTeamMutation(overview);
   });
   ipcMain.handle(IPC.teamDeleteUser, async (_event, id: unknown) => {
     const overview = team.deleteUser(str(id, "member id"));
-    await revokeTeamKeys();
-    return overview;
+    return finishTeamMutation(overview);
   });
   ipcMain.handle(IPC.teamSetMachineLinks, async (_event, machineId: unknown, userIds: unknown) => {
     team.syncMachines(listSshHosts(store));
     const ids = Array.isArray(userIds) ? userIds.filter((id): id is string => typeof id === "string" && id.length > 0) : [];
     const overview = team.setMachineLinks(str(machineId, "machine id"), ids);
-    await revokeTeamKeys();
-    return overview;
+    return finishTeamMutation(overview);
   });
   ipcMain.handle(IPC.teamSetUserMachineLinks, async (_event, userId: unknown, machineIds: unknown) => {
     team.syncMachines(listSshHosts(store));
@@ -185,8 +213,7 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
       ? machineIds.filter((id): id is string => typeof id === "string" && id.length > 0)
       : [];
     const overview = team.setUserMachineLinks(str(userId, "member id"), ids);
-    await revokeTeamKeys();
-    return overview;
+    return finishTeamMutation(overview);
   });
   ipcMain.handle(IPC.teamAudit, (_event, filter: TeamAuditFilter | undefined) =>
     team.auditLog(filter ?? {}),
@@ -311,13 +338,31 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
   });
 
   ipcMain.handle(IPC.hostsList, () => {
-    if (team.currentUser().role === "user") return [];
-    return store.hosts().map(({ secretEnc: _secret, ...rest }) => rest);
+    const user = team.currentUser();
+    const all = store.hosts();
+    team.syncPveHosts(all);
+    const visible =
+      user.role === "user"
+        ? all.filter((host) => host.ownerId === user.id && team.canUsePveEndpoint(user.id, host.baseUrl))
+        : all;
+    return visible.map(publicHost);
   });
 
   ipcMain.handle(IPC.hostsSave, (_event, input: HostInput) => {
-    requireOperator();
-    const saved = store.saveHost({ ...input, baseUrl: normalizeBaseUrl(input.baseUrl) });
+    const user = team.currentUser();
+    const baseUrl = normalizeBaseUrl(input.baseUrl);
+    if (user.role === "user") {
+      if (input.id) {
+        const existing = store.host(input.id);
+        if (!existing || existing.ownerId !== user.id) {
+          throw new Error("Add this Proxmox endpoint to this computer with your own API token first.");
+        }
+      }
+      if (!team.canUsePveEndpoint(user.id, baseUrl)) {
+        throw new Error("This Proxmox endpoint is not linked to your account. Ask an admin for access.");
+      }
+    }
+    const saved = store.saveHost({ ...input, baseUrl }, user.id);
     team.syncPveHosts(store.hosts());
     dropClient(saved.id);
     invalidate(saved.id);
@@ -334,21 +379,49 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
   });
 
   ipcMain.handle(IPC.hostsTest, (_event, input: HostInput) => {
-    requireOperator();
-    return testHost({ ...input, baseUrl: normalizeBaseUrl(input.baseUrl) });
+    const user = team.currentUser();
+    const baseUrl = normalizeBaseUrl(input.baseUrl);
+    if (user.role === "user" && !team.canUsePveEndpoint(user.id, baseUrl)) {
+      throw new Error("This Proxmox endpoint is not linked to your account. Ask an admin for access.");
+    }
+    return testHost({ ...input, baseUrl });
   });
 
   ipcMain.handle(IPC.sshHostsList, () => {
     const user = team.currentUser();
     const all = listSshHosts(store);
     team.syncMachines(all);
-    return user.role === "user" ? all.filter((host) => team.canAccessMachine(user.id, host.id)) : all;
+    return user.role === "user"
+      ? all.filter((host) => store.sshHost(host.id)?.ownerId === user.id && team.canUseSshEndpoint(user.id, host))
+      : all;
   });
   ipcMain.handle(IPC.sshHostsSave, (_event, input: SshHostInput) => {
-    const user = requireOperator();
-    const saved = saveSshHost(store, input);
+    const user = team.currentUser();
+    const candidate = {
+      ...input,
+      host: (input?.host ?? "").trim(),
+      port: Number(input?.port ?? 22) || 22,
+      username: (input?.username ?? "").trim(),
+    };
+    if (user.role === "user") {
+      if (input?.id) {
+        const existing = store.sshHost(input.id);
+        if (!existing || existing.ownerId !== user.id) {
+          throw new Error("Add this machine to this computer with your own SSH key or password first.");
+        }
+      }
+      if (
+        !team.canUseSshEndpoint(user.id, {
+          host: candidate.host,
+          port: candidate.port,
+          username: candidate.username,
+        })
+      ) {
+        throw new Error("This machine is not linked to your account. Ask an admin for access.");
+      }
+    }
+    const saved = saveSshHost(store, input, user.id);
     team.syncMachines(listSshHosts(store));
-    void user;
     return saved;
   });
   ipcMain.handle(IPC.sshHostsRemove, async (_event, id: unknown) => {
@@ -359,7 +432,15 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
     await revokeTeamKeys();
   });
   ipcMain.handle(IPC.sshHostsTest, (_event, input: SshHostInput) => {
-    requireOperator();
+    const user = team.currentUser();
+    const candidate = {
+      host: (input?.host ?? "").trim(),
+      port: Number(input?.port ?? 22) || 22,
+      username: (input?.username ?? "").trim(),
+    };
+    if (user.role === "user" && !team.canUseSshEndpoint(user.id, candidate)) {
+      throw new Error("This machine is not linked to your account. Ask an admin for access.");
+    }
     return testSshHost(input);
   });
   ipcMain.handle(IPC.sshSnapshot, (_event, hostId: unknown) => {
@@ -369,8 +450,11 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
   });
   ipcMain.handle(IPC.sshHealth, async () => {
     const user = team.currentUser();
-    const results = await probeSshHealth(store);
-    return user.role === "user" ? results.filter((entry) => team.canAccessMachine(user.id, entry.id)) : results;
+    if (user.role !== "user") return probeSshHealth(store);
+    const visible = listSshHosts(store).filter(
+      (host) => store.sshHost(host.id)?.ownerId === user.id && team.canUseSshEndpoint(user.id, host),
+    );
+    return probeSshHealth(store, new Set(visible.map((host) => host.id)));
   });
   ipcMain.handle(IPC.sshExec, (_event, hostId, command, options) => {
     const id = str(hostId, "host id");
@@ -526,13 +610,15 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
   });
 
   ipcMain.handle(IPC.pveSnapshot, (_event, hostId: unknown) => {
-    requireOperator();
-    return collectSnapshot(store, str(hostId, "host id"));
+    const id = str(hostId, "host id");
+    guardPveHost(id);
+    return collectSnapshot(store, id);
   });
 
   ipcMain.handle(IPC.pveVmDetail, (_event, hostId, node, type, vmid) => {
-    requireOperator();
-    return getVmDetail(store, str(hostId, "host id"), str(node, "node"), vmType(type), num(vmid, "vmid"));
+    const id = str(hostId, "host id");
+    guardPveHost(id);
+    return getVmDetail(store, id, str(node, "node"), vmType(type), num(vmid, "vmid"));
   });
 
   ipcMain.handle(IPC.pveVmAction, (_event, hostId, node, type, vmid, action) => {
@@ -571,14 +657,16 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
   });
 
   ipcMain.handle(IPC.pveTaskLog, (_event, hostId, node, upid) => {
-    requireOperator();
-    return taskLog(store, str(hostId, "host id"), str(node, "node"), str(upid, "upid"));
+    const id = str(hostId, "host id");
+    guardPveHost(id);
+    return taskLog(store, id, str(node, "node"), str(upid, "upid"));
   });
 
   ipcMain.handle(IPC.pveNodeRrd, (_event, hostId, node, timeframe) => {
-    requireOperator();
+    const id = str(hostId, "host id");
+    guardPveHost(id);
     const frame = timeframe === "day" || timeframe === "week" ? timeframe : "hour";
-    return nodeRrd(store, str(hostId, "host id"), str(node, "node"), frame);
+    return nodeRrd(store, id, str(node, "node"), frame);
   });
 
   ipcMain.handle(IPC.backupArchives, (_event, hostId) => {
@@ -710,7 +798,6 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
   ipcMain.handle(IPC.vncSetup, (_event, hostId: unknown, sudoPassword: unknown) => {
     const id = str(hostId, "host id");
     guardSshHost(id);
-    requireOperator();
     return vnc.setup(id, typeof sudoPassword === "string" ? sudoPassword : undefined);
   });
   ipcMain.handle(IPC.vncOpen, (_event, hostId: unknown, port: unknown) => {

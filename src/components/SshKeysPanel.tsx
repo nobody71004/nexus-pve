@@ -56,16 +56,23 @@ export function SshKeysPanel({ onToast }: { onToast: (level: "info" | "warn" | "
     void bridge.team
       .overview()
       .then((team) => {
-        const standard = team.users.filter((user) => user.role === "user");
-        setMembers(standard);
+        // Elevated roles can receive a key for every machine, so they must be
+        // selectable here too. The old member-only filter made a newly added
+        // admin invisible to the key control plane.
+        const active = team.users.filter((user) => user.status === "active");
+        setMembers(active);
         setTeamMachines(team.machines);
-        setMemberId((current) => (current && standard.some((user) => user.id === current) ? current : standard[0]?.id ?? ""));
+        setMemberId((current) => (current && active.some((user) => user.id === current) ? current : active[0]?.id ?? ""));
       })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, []);
 
+  const selectedMember = members.find((member) => member.id === memberId);
   const memberHosts = overview
     ? overview.hosts.filter((host) => {
+        // Admins and moderators have implicit access to every machine, so they
+        // get every host without needing individual machine links.
+        if (selectedMember && selectedMember.role !== "user") return true;
         const machine = teamMachines.find((entry) => entry.id === host.hostId);
         return !machine || machine.linkedUserIds.includes(memberId);
       })
@@ -76,9 +83,9 @@ export function SshKeysPanel({ onToast }: { onToast: (level: "info" | "warn" | "
     setMemberHostId((current) =>
       memberHosts.some((host) => host.hostId === current) ? current : (memberHosts[0]?.hostId ?? ""),
     );
-    // memberHosts is derived from these three inputs.
+    // memberHosts is derived from these inputs, including the selected role.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overview, memberId, teamMachines]);
+  }, [overview, memberId, teamMachines, members]);
 
   const issueMemberKey = async (input: { hostId: string; userId?: string; rotate?: boolean }) => {
     setBusy("issue-member");
@@ -212,7 +219,7 @@ export function SshKeysPanel({ onToast }: { onToast: (level: "info" | "warn" | "
           onChange={(event) => setMemberId(event.target.value)}
           disabled={Boolean(busy) || members.length === 0}
         >
-          {members.length === 0 ? <option value="">No standard members</option> : null}
+          {members.length === 0 ? <option value="">No active members</option> : null}
           {members.map((member) => (
             <option key={member.id} value={member.id}>
               {member.displayName} (@{member.username})
@@ -225,7 +232,9 @@ export function SshKeysPanel({ onToast }: { onToast: (level: "info" | "warn" | "
           onChange={(event) => setMemberHostId(event.target.value)}
           disabled={Boolean(busy) || memberHosts.length === 0}
         >
-          {memberHosts.length === 0 ? <option value="">No machines granted</option> : null}
+          {memberHosts.length === 0 ? (
+            <option value="">{selectedMember && selectedMember.role !== "user" ? "No Linux hosts" : "No machines granted"}</option>
+          ) : null}
           {memberHosts.map((host) => (
             <option key={host.hostId} value={host.hostId}>
               {host.label} — {host.username}@{host.host}

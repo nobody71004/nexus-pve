@@ -844,11 +844,9 @@ export function LinuxHosts({
                     <button className="btn small ghost" onClick={() => setActiveId(host.id)}>
                       {activeId === host.id ? "Live view" : "Open"}
                     </button>
-                    {canManage ? (
-                      <button className="btn small ghost" onClick={() => startEdit(host)}>
-                        Edit
-                      </button>
-                    ) : null}
+                    <button className="btn small ghost" onClick={() => startEdit(host)}>
+                      Edit
+                    </button>
                     <button
                       className="btn icon ghost"
                       onClick={() => void runSpeed(host.id)}
@@ -877,7 +875,7 @@ export function LinuxHosts({
                   <p>
                     {canManage
                       ? "Add a VPS or bare-metal box. Key or password auth both work; the credential is encrypted on this machine."
-                      : "Ask an admin to link an SSH machine to your team account; only linked machines appear here."}
+                      : "Add a machine shared with you below using your own SSH key or password; it will appear here with its normal controls and console."}
                   </p>
                 </div>
               </div>
@@ -1163,7 +1161,7 @@ export function LinuxHosts({
                 {consoleTab === "cli" ? (
                   <SshTerminal host={activeHost} onToast={onToast} />
                 ) : (
-                  <VncConsole host={activeHost} onToast={onToast} canSetup={canManage} />
+                  <VncConsole host={activeHost} onToast={onToast} />
                 )}
               </Panel>
             ) : null}

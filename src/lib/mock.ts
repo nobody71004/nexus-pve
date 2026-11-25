@@ -1608,6 +1608,10 @@ export function createMockBridge(): NexusBridge {
     team: {
       overview: async () => mockTeamOverview(),
       createUser: async (input: TeamUserInput) => {
+        const grantAll = input.grantAllMachines === true;
+        const machineIds = grantAll
+          ? mockTeamMachines().map((machine) => machine.id)
+          : [...new Set(input.machineIds ?? [])];
         const user: TeamUser = {
           id: `user-${Date.now()}`,
           username: input.username.trim().toLowerCase(),
@@ -1616,14 +1620,35 @@ export function createMockBridge(): NexusBridge {
           status: "active",
           createdAt: Date.now(),
           updatedAt: Date.now(),
-          linkedMachines: 0,
+          linkedMachines: mockRole(input.role) === "user" ? machineIds.length : mockTeamMachines().length,
           online: false,
         };
         mockUsers = [...mockUsers, user];
+        if (user.role === "user") {
+          for (const machineId of machineIds) {
+            mockMachineLinks[machineId] = [...new Set([...(mockMachineLinks[machineId] ?? []), user.id])];
+          }
+        }
         mockTeamActivity = [
           { id: `act-${Date.now()}`, at: Date.now(), actorId: mockAdmin.id, actorName: mockAdmin.displayName, action: "user.create", targetType: "user", targetId: user.id, targetName: user.displayName, detail: `Created ${user.role} @${user.username}` },
           ...mockTeamActivity,
         ];
+        if (user.role === "user" && machineIds.length > 0) {
+          mockTeamActivity = [
+            {
+              id: `act-${Date.now()}-links`,
+              at: Date.now(),
+              actorId: mockAdmin.id,
+              actorName: mockAdmin.displayName,
+              action: "machine.links",
+              targetType: "user",
+              targetId: user.id,
+              targetName: user.displayName,
+              detail: `${machineIds.length} machine${machineIds.length === 1 ? "" : "s"} granted at account creation`,
+            },
+            ...mockTeamActivity,
+          ];
+        }
         return mockTeamOverview();
       },
       updateUser: async (id: string, patch: TeamUserPatch) => {

@@ -811,12 +811,54 @@ export class TeamService {
     const salt = crypto.randomBytes(16).toString("hex");
     const hash = crypto.scryptSync(password, salt, 64).toString("hex");
 
+    // Standard members need explicit links. Resolve the complete set before
+    // opening the transaction so the account and its access either both land
+    // or both fail; this is what makes the one-click add flow reliable.
+    let machineIds: string[] = [];
+    if (role === "user") {
+      if (input?.grantAllMachines === true) {
+        machineIds = this.all("SELECT id FROM machines ORDER BY label COLLATE NOCASE").map((row) => String(row.id));
+      } else if (Array.isArray(input?.machineIds)) {
+        const wanted = [...new Set(input.machineIds.filter((machineId) => typeof machineId === "string" && machineId.length > 0))];
+        const available = new Set(this.all("SELECT id FROM machines").map((row) => String(row.id)));
+        if (wanted.some((machineId) => !available.has(machineId))) {
+          throw new Error("One of the selected machines no longer exists. Refresh the inventory and try again.");
+        }
+        machineIds = wanted;
+      }
+    }
+
     this.transaction(() => {
       this.run(
         "INSERT INTO users (id, username, display_name, role, status, password_salt, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)",
         [id, username, displayName, role, salt, hash, now, now],
       );
-      this.audit(actor, "user.create", "user", id, displayName, `Created ${roleLabel(role)} @${username}`);
+      for (const machineId of machineIds) {
+        this.run("INSERT INTO machine_links (user_id, machine_id, created_at, created_by) VALUES (?, ?, ?, ?)", [
+          id,
+          machineId,
+          now,
+          actor.id,
+        ]);
+        this.run("UPDATE machines SET links_updated_at = ? WHERE id = ?", [now, machineId]);
+      }
+      const access =
+        machineIds.length > 0
+          ? ` · ${machineIds.length} machine${machineIds.length === 1 ? "" : "s"} granted`
+          : role === "user"
+            ? ""
+            : ` · every workspace machine via ${roleLabel(role)} access`;
+      this.audit(actor, "user.create", "user", id, displayName, `Created ${roleLabel(role)} @${username}${access}`);
+      if (machineIds.length > 0) {
+        this.audit(
+          actor,
+          "machine.links",
+          "user",
+          id,
+          displayName,
+          `${machineIds.length} machine${machineIds.length === 1 ? "" : "s"} granted at account creation`,
+        );
+      }
     });
     return this.overview();
   }
@@ -1287,7 +1329,7 @@ export class TeamService {
       this.run("DELETE FROM machines WHERE id = ?", [String(row.id)]);
       changed = true;
     }
-    for (const [key, host] of wanted) {
+    for (const host of wanted.values()) {
       const endpoint = pveEndpoint(host.baseUrl);
       let existing = this.one("SELECT * FROM machines WHERE id = ?", [host.id]);
       let carriedLinksUpdatedAt = 0;
@@ -1336,6 +1378,37 @@ export class TeamService {
     if (!user || String(user.status) !== "active") return false;
     if (String(user.role) !== "user") return true;
     return this.count("SELECT COUNT(*) AS count FROM machine_links WHERE user_id = ? AND machine_id = ?", [userId, machineId]) > 0;
+  }
+
+  /**
+   * A standard member may adopt a workspace SSH endpoint into this computer's
+   * inventory with their own key or password. Match either the local machine
+   * row (after adoption) or the workspace endpoint itself (before adoption).
+   */
+  canUseSshEndpoint(
+    userId: string,
+    endpoint: { id?: string; host: string; port?: number; username: string },
+  ): boolean {
+    const user = this.userRow(userId);
+    if (!user || String(user.status) !== "active") return false;
+    if (String(user.role) !== "user") return true;
+    if (endpoint.id && this.canAccessMachine(userId, endpoint.id)) return true;
+    const machines = this.all(
+      "SELECT id FROM machines WHERE kind = 'ssh' AND lower(host) = ? AND port = ? AND lower(username) = ?",
+      [endpoint.host.trim().toLowerCase(), Number(endpoint.port ?? 22) || 22, endpoint.username.trim().toLowerCase()],
+    );
+    return machines.some((machine) => this.canAccessMachine(userId, String(machine.id)));
+  }
+
+  /** A standard member may adopt a granted Proxmox API endpoint locally. */
+  canUsePveEndpoint(userId: string, baseUrl: string): boolean {
+    const user = this.userRow(userId);
+    if (!user || String(user.status) !== "active") return false;
+    if (String(user.role) !== "user") return true;
+    const normalized = normalizePveBaseUrl(baseUrl);
+    if (!normalized) return false;
+    const machines = this.all("SELECT id FROM machines WHERE kind = 'pve' AND lower(base_url) = ?", [normalized]);
+    return machines.some((machine) => this.canAccessMachine(userId, String(machine.id)));
   }
 
   /**
@@ -1412,7 +1485,14 @@ export class TeamService {
   private toTeamUser(id: string): TeamUser | null {
     const row = this.userRow(id);
     if (!row) return null;
-    const linked = this.count("SELECT COUNT(*) AS count FROM machine_links WHERE user_id = ?", [id]);
+    const role = normalizeRole(String(row.role));
+    // Admins and moderators have implicit access to every machine. Report the
+    // effective count so the directory and key panel do not make them look
+    // unlinked just because they have no explicit machine_links rows.
+    const linked =
+      role === "user"
+        ? this.count("SELECT COUNT(*) AS count FROM machine_links WHERE user_id = ?", [id])
+        : this.count("SELECT COUNT(*) AS count FROM machines");
     const online =
       id === this.currentUserId ||
       this.count("SELECT COUNT(*) AS count FROM sessions WHERE user_id = ? AND last_seen_at > ?", [

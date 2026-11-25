@@ -104,6 +104,15 @@ test("Add member dialog preserves username focus and value across a parent reren
       () => document.querySelector<HTMLElement>('[role="dialog"][aria-label="Add a workspace member"]'),
       "the Add member dialog",
     );
+    const allMachinesToggle = [...dialog.querySelectorAll("label")].find((label) =>
+      label.textContent?.includes("All workspace machines"),
+    );
+    assert(allMachinesToggle, "new members should default to the all-machines grant");
+    assert.equal(
+      allMachinesToggle.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked,
+      true,
+      "the one-click all-machines grant is selected by default",
+    );
     const usernameLabel = [...dialog.querySelectorAll("label")].find(
       (label) => label.querySelector("span")?.textContent?.trim() === "Username",
     );

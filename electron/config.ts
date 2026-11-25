@@ -9,15 +9,19 @@ import type { AppSettings, HostInput, HostSummary, SshHostInput, SshHostSummary 
 
 export interface StoredHost extends HostSummary {
   secretEnc?: string;
+  /** Team account that added this local credential set. */
+  ownerId?: string;
 }
 
 export interface StoredSshHost extends SshHostSummary {
   /** Password for authMode "password", AES-256-GCM like the Proxmox token. */
   secretEnc?: string;
+  /** Team account that added this local credential set. */
+  ownerId?: string;
 }
 
 function publicSshHost(host: StoredSshHost): SshHostSummary {
-  const { secretEnc: _secretEnc, ...rest } = host;
+  const { secretEnc: _secretEnc, ownerId: _ownerId, ...rest } = host;
   return rest;
 }
 
@@ -89,7 +93,7 @@ export function normalizeBaseUrl(raw: string): string {
 }
 
 export function publicHost(host: StoredHost): HostSummary {
-  const { secretEnc: _secretEnc, ...rest } = host;
+  const { secretEnc: _secretEnc, ownerId: _ownerId, ...rest } = host;
   return rest;
 }
 
@@ -211,7 +215,7 @@ export class ConfigStore {
     return decryptSecret(enc);
   }
 
-  saveHost(input: HostInput): HostSummary {
+  saveHost(input: HostInput, ownerId?: string): HostSummary {
     const config = this.read();
     const baseUrl = normalizeBaseUrl(input.baseUrl);
     const existing = input.id ? config.hosts.find((h) => h.id === input.id) : undefined;
@@ -239,6 +243,7 @@ export class ConfigStore {
       createdAt: existing?.createdAt ?? Date.now(),
       lastSeenAt: existing?.lastSeenAt,
       secretEnc: input.secret ? encryptSecret(input.secret) : existing?.secretEnc,
+      ownerId: existing?.ownerId ?? ownerId,
     };
 
     if (existing) {
@@ -281,7 +286,7 @@ export class ConfigStore {
     );
   }
 
-  saveSshHost(input: SshHostInput): SshHostSummary {
+  saveSshHost(input: SshHostInput, ownerId?: string): SshHostSummary {
     const config = this.read();
     const hostname = (input.host || "").trim().replace(/^ssh:\/\//, "");
     if (!hostname || /\s/.test(hostname)) throw new Error("Host name or IP is required and cannot contain spaces");
@@ -323,6 +328,7 @@ export class ConfigStore {
             ? encryptSecret(input.password)
             : existing?.secretEnc
           : undefined,
+      ownerId: existing?.ownerId ?? ownerId,
     };
 
     config.sshHosts = existing

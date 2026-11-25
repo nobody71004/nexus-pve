@@ -60,6 +60,7 @@ export function ConnectPanel({
   statuses,
   activeId,
   info,
+  canManage = true,
   onSelect,
   onSave,
   onRemove,
@@ -70,6 +71,7 @@ export function ConnectPanel({
   statuses: Record<string, HostRuntimeStatus>;
   activeId: string | null;
   info: AppInfo | null;
+  canManage?: boolean;
   onSelect: (id: string) => void;
   onSave: (input: HostInput) => Promise<void>;
   onRemove: (host: HostSummary) => void | Promise<void>;
@@ -289,9 +291,11 @@ export function ConnectPanel({
           eyebrow="ENDPOINTS"
           title="Proxmox hosts"
           actions={
-            <button className="btn small primary" onClick={startNew}>
-              <Icon name="plus" size={13} /> Add host
-            </button>
+            canManage ? (
+              <button className="btn small primary" onClick={startNew}>
+                <Icon name="plus" size={13} /> Add host
+              </button>
+            ) : null
           }
         >
           <div className="host-cards">
@@ -334,9 +338,11 @@ export function ConnectPanel({
                     <button className="btn small ghost" onClick={() => startEdit(host)}>
                       Edit
                     </button>
-                    <button className="btn icon ghost danger" onClick={() => onRemove(host)} title="Remove host">
-                      <Icon name="trash" size={12} />
-                    </button>
+                    {canManage ? (
+                      <button className="btn icon ghost danger" onClick={() => onRemove(host)} title="Remove host">
+                        <Icon name="trash" size={12} />
+                      </button>
+                    ) : null}
                   </footer>
                 </article>
               );
@@ -345,8 +351,12 @@ export function ConnectPanel({
               <div className="empty-inline">
                 <Icon name="server" size={20} />
                 <div>
-                  <strong>No hosts yet</strong>
-                  <p>Add your Proxmox endpoint and an API token. Nothing is stored in the renderer.</p>
+                  <strong>{canManage ? "No hosts yet" : "No Proxmox endpoint on this computer"}</strong>
+                  <p>
+                    {canManage
+                      ? "Add your Proxmox endpoint and an API token. Nothing is stored in the renderer."
+                      : "Shared Proxmox endpoints appear below. Add one with your own API token to open it here."}
+                  </p>
                 </div>
               </div>
             ) : null}
@@ -401,9 +411,11 @@ export function ConnectPanel({
               <span className="hint small">
                 {sshLoading && sshHosts.length === 0 ? "Checking…" : `${sshHosts.length} configured`}
               </span>
-              <button className="btn small primary" onClick={startNewSsh}>
-                <Icon name="plus" size={13} /> Add Linux host
-              </button>
+              {canManage ? (
+                <button className="btn small primary" onClick={startNewSsh}>
+                  <Icon name="plus" size={13} /> Add Linux host
+                </button>
+              ) : null}
               {onOpenHosts ? (
                 <button className="btn small ghost" onClick={onOpenHosts}>
                   <Icon name="terminal" size={13} /> Manage
@@ -474,7 +486,9 @@ export function ConnectPanel({
                   <p>
                     {sshError
                       ? sshError
-                      : "Add a Linux host in the Linux hosts tab to manage services, power and backups over SSH."}
+                      : canManage
+                        ? "Add a Linux host in the Linux hosts tab to manage services, power and backups over SSH."
+                        : "Shared Linux machines appear below. Add one with your own SSH key or password to open it here."}
                   </p>
                 </div>
               </div>
@@ -674,11 +688,23 @@ export function ConnectPanel({
             </div>
           </Panel>
         ) : sshEditing ? null : (
-          <Panel eyebrow="NO SELECTION" title="Add a host to begin">
-            <p className="subtle">Pick a host on the left or create a new connection.</p>
-            <button className="btn primary" onClick={startNew}>
-              <Icon name="plus" size={13} /> Add host
-            </button>
+          <Panel
+            eyebrow={canManage ? "NO SELECTION" : "TEAM ACCESS"}
+            title={canManage ? "Add a host to begin" : "Use a machine shared with you"}
+          >
+            {canManage ? (
+              <>
+                <p className="subtle">Pick a host on the left or create a new connection.</p>
+                <button className="btn primary" onClick={startNew}>
+                  <Icon name="plus" size={13} /> Add host
+                </button>
+              </>
+            ) : (
+              <p className="subtle">
+                Choose <b>Add to this computer</b> on a Proxmox or Linux machine shared with you, then enter your own
+                credentials. It will appear in the matching tab with its normal SSH and VNC console.
+              </p>
+            )}
           </Panel>
         )}
 

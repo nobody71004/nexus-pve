@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import fs from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -11,6 +12,8 @@ import type { TeamOverview } from "../shared/team-types";
 import type { SshHostSummary } from "../shared/types";
 import { TeamService } from "../electron/team/store";
 import { TeamSyncService } from "../electron/team/sync";
+import { loginWithFreshWorkspace } from "../electron/team/login";
+import { publishTeamMutation } from "../electron/team/mutation";
 import { ConfigStore } from "../electron/config";
 import { SshKeyService } from "../electron/sshkeys/service";
 import { revokeUnauthorizedTeamKeys } from "../electron/team/access-keys";
@@ -313,6 +316,165 @@ test("team access survives create, grant, member sign-in, revoke and two-device 
         /* best effort */
       }
     }
+    fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
+});
+
+test("admin and moderator roles get every machine without explicit grants", { timeout: 30_000 }, async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nexus-team-admin-access-e2e-"));
+  const previousHome = process.env.NEXUS_PVE_HOME;
+  let team: TeamService | undefined;
+
+  try {
+    team = await openTeam(path.join(tempRoot, "device"));
+    await team.bootstrap({ username: "owner", displayName: "Morgan Lee", password: PASSWORD });
+    team.syncMachines([sshHost("edge-a", "Edge relay", EDGE_HOST), sshHost("gpu-a", "GPU worker", GPU_HOST)]);
+
+    let overview = team.overview();
+    const edge = machineByHost(overview, EDGE_HOST);
+    const gpu = machineByHost(overview, GPU_HOST);
+    overview = team.createUser({ username: "admin", displayName: "Ada Admin", role: "admin", password: PASSWORD });
+    overview = team.createUser({ username: "mod", displayName: "Mo Moderator", role: "moderator", password: PASSWORD });
+    overview = team.createUser({ username: "member", displayName: "Mia Member", role: "user", password: PASSWORD });
+    const admin = userByName(overview, "admin");
+    const moderator = userByName(overview, "mod");
+    const member = userByName(overview, "member");
+
+    // Effective access is visible immediately, without a single machine_links row.
+    assert.equal(admin.linkedMachines, 2);
+    assert.equal(moderator.linkedMachines, 2);
+    assert.equal(member.linkedMachines, 0);
+    assert.equal(team.canAccessMachine(admin.id, edge.id), true);
+    assert.equal(team.canAccessMachine(moderator.id, gpu.id), true);
+    assert.equal(team.canUseSshKey(admin.id, edge.id), true);
+    assert.equal(team.canUseSshKey(member.id, edge.id), false);
+
+    await team.login({ username: "admin", password: PASSWORD });
+    assert.deepEqual(machineHosts(team.overview()), [EDGE_HOST, GPU_HOST]);
+    await team.logout();
+
+    await team.login({ username: "member", password: PASSWORD });
+    assert.deepEqual(machineHosts(team.overview()), []);
+  } finally {
+    try {
+      team?.close();
+    } catch {
+      /* best effort */
+    }
+    restoreHome(previousHome);
+    fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
+});
+
+test("super admin creates a member with every workspace machine in one save and syncs the grants", { timeout: 60_000 }, async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nexus-team-create-all-e2e-"));
+  const previousHome = process.env.NEXUS_PVE_HOME;
+  let relay: RelayHandle | undefined;
+  let ownerStation: TeamService | undefined;
+  let memberStation: TeamService | undefined;
+  let ownerSync: TeamSyncService | undefined;
+  let memberSync: TeamSyncService | undefined;
+
+  try {
+    relay = await startRelay(tempRoot);
+    ownerStation = await openTeam(path.join(tempRoot, "owner-station"));
+    await ownerStation.bootstrap({ username: "owner", displayName: "Morgan Lee", password: PASSWORD });
+    ownerStation.syncMachines([sshHost("edge-a", "Edge relay", EDGE_HOST), sshHost("gpu-a", "GPU worker", GPU_HOST)]);
+
+    // One call creates the account and attaches every machine. There is no
+    // follow-up grant call that could fail or leave the member half-provisioned.
+    let overview = ownerStation.createUser({
+      username: "newops",
+      displayName: "New Operator",
+      role: "user",
+      password: PASSWORD,
+      grantAllMachines: true,
+    });
+    const newOps = userByName(overview, "newops");
+    assert.equal(newOps.linkedMachines, 2);
+    assert.deepEqual(linkedHosts(overview, newOps.id), [EDGE_HOST, GPU_HOST]);
+    assert.ok(
+      overview.machines.every((machine) => machine.linkedUserIds.includes(newOps.id)),
+      "every workspace machine is linked in the same create operation",
+    );
+    assert.ok(
+      overview.activity.some(
+        (entry) =>
+          entry.action === "machine.links" &&
+          entry.targetName === "New Operator" &&
+          entry.detail === "2 machines granted at account creation",
+      ),
+      "the automatic grants are audit-logged",
+    );
+
+    ownerSync = new TeamSyncService(ownerStation, () => undefined, path.join(tempRoot, "sync-owner.json"));
+    const published = await ownerSync.configure({
+      endpoint: relay.url,
+      token: TOKEN,
+      workspace: "team-create-all-e2e",
+      deviceName: "owner-station",
+    });
+    assert.equal(published.status.phase, "online");
+
+    memberStation = await openTeam(path.join(tempRoot, "member-station"));
+    memberSync = new TeamSyncService(memberStation, () => undefined, path.join(tempRoot, "sync-member.json"));
+    const pulled = await memberSync.configure({
+      endpoint: relay.url,
+      token: TOKEN,
+      workspace: "team-create-all-e2e",
+      deviceName: "member-station",
+    });
+    assert.equal(pulled.status.phase, "online");
+
+    const mirrored = memberStation.syncSnapshot().machines;
+    assert.equal(mirrored.length, 2);
+    assert.ok(
+      mirrored.every((machine) => machine.linkedUsernames.includes("newops")),
+      "the machine grants reached the second station",
+    );
+
+    const memberOnB = await memberStation.login({ username: "newops", password: PASSWORD });
+    assert.equal(memberOnB.role, "user");
+    const memberView = memberStation.overview();
+    assert.deepEqual(machineHosts(memberView), [EDGE_HOST, GPU_HOST]);
+    const edgeOnB = machineByHost(memberView, EDGE_HOST);
+    const gpuOnB = machineByHost(memberView, GPU_HOST);
+    assert.equal(memberStation.canAccessMachine(memberOnB.id, edgeOnB.id), true);
+    assert.equal(memberStation.canAccessMachine(memberOnB.id, gpuOnB.id), true);
+    assert.equal(memberStation.canUseSshKey(memberOnB.id, edgeOnB.id), true);
+    assert.equal(
+      memberStation.canUseSshEndpoint(memberOnB.id, { host: EDGE_HOST, port: 22, username: "root" }),
+      true,
+      "the member can adopt the granted SSH endpoint with their own credentials",
+    );
+    assert.equal(
+      memberStation.canUseSshEndpoint(memberOnB.id, { host: "10.42.0.99", port: 22, username: "root" }),
+      false,
+      "an endpoint outside the member's grants cannot be adopted",
+    );
+  } finally {
+    for (const service of [ownerSync, memberSync]) {
+      try {
+        service?.close();
+      } catch {
+        /* best effort */
+      }
+    }
+    for (const service of [ownerStation, memberStation]) {
+      try {
+        service?.close();
+      } catch {
+        /* best effort */
+      }
+    }
+    if (relay) {
+      try {
+        await stopRelay(relay);
+      } catch {
+        /* best effort */
+      }
+    }
+    restoreHome(previousHome);
     fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   }
 });
@@ -951,6 +1113,13 @@ test("Proxmox endpoints sync as workspace machines without credentials", { timeo
     overview = teamA.setUserMachineLinks(member.id, [pve.id]);
     const pveAfterGrant = overview.machines.find((machine) => machine.kind === "pve");
     assert.ok(pveAfterGrant?.linkedUserIds.includes(member.id), "the member grant is recorded on the Proxmox entry");
+    assert.equal(teamA.canUsePveEndpoint(member.id, "https://10.42.0.86:8006"), true);
+    assert.equal(teamA.canUsePveEndpoint(member.id, "https://10.42.0.87:8006"), false);
+    assert.equal(
+      teamA.canUseSshEndpoint(member.id, { host: EDGE_HOST, port: 22, username: "root" }),
+      false,
+      "a Proxmox grant does not grant the unrelated SSH endpoint",
+    );
 
     const snapshotA = teamA.syncSnapshot();
     const syncedPve = snapshotA.machines.find((machine) => machine.kind === "pve");
@@ -990,6 +1159,9 @@ test("Proxmox endpoints sync as workspace machines without credentials", { timeo
     assert.equal(adopted[0].label, "Cynosure local");
     assert.deepEqual(adopted[0].linkedUsernames, ["member"], "the grant survives adoption");
     assert.equal("secret" in adopted[0], false);
+    const memberB = await teamB.login({ username: "member", password: PASSWORD });
+    assert.equal(teamB.canUsePveEndpoint(memberB.id, "https://10.42.0.86:8006"), true);
+    assert.equal(teamB.canUsePveEndpoint(memberB.id, "https://10.42.0.88:8006"), false);
   } finally {
     try {
       teamA?.close();
@@ -1000,6 +1172,162 @@ test("Proxmox endpoints sync as workspace machines without credentials", { timeo
       teamB?.close();
     } catch {
       /* best effort */
+    }
+    restoreHome(previousHome);
+    fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
+});
+
+test("member creation stays local and reports the relay error when immediate sync fails", { timeout: 30_000 }, async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nexus-team-sync-failure-e2e-"));
+  const previousHome = process.env.NEXUS_PVE_HOME;
+  let team: TeamService | undefined;
+  let sync: TeamSyncService | undefined;
+  let relay: http.Server | undefined;
+
+  try {
+    relay = http.createServer((_request, response) => {
+      response.writeHead(503, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: "relay rejected the test update" }));
+    });
+    await new Promise<void>((resolve, reject) => {
+      relay!.once("error", reject);
+      relay!.listen(0, "127.0.0.1", resolve);
+    });
+    const address = relay.address();
+    if (!address || typeof address === "string") throw new Error("Could not bind the failing relay fixture.");
+
+    team = await openTeam(path.join(tempRoot, "station"));
+    await team.bootstrap({ username: "owner", displayName: "Relay Owner", password: PASSWORD });
+    team.syncMachines([sshHost("edge-a", "Edge relay", EDGE_HOST)]);
+
+    sync = new TeamSyncService(team, () => undefined, path.join(tempRoot, "sync.json"));
+    await assert.rejects(
+      sync.configure({
+        endpoint: `http://127.0.0.1:${address.port}`,
+        token: TOKEN,
+        workspace: "sync-failure-e2e",
+        deviceName: "station",
+      }),
+      /relay rejected the test update/,
+    );
+    assert.equal(sync.status().enabled, true, "the station remains configured after the failed initial sync");
+    assert.equal(sync.status().phase, "error");
+
+    const created = team.createUser({
+      username: "relaymember",
+      displayName: "Relay Member",
+      role: "user",
+      password: PASSWORD,
+      grantAllMachines: true,
+    });
+    const result = await publishTeamMutation(created, sync);
+
+    assert.match(result.syncWarning ?? "", /relay rejected the test update/);
+    assert.ok(
+      result.users.some((user) => user.username === "relaymember"),
+      "the overview returned to the admin still includes the locally created member",
+    );
+    assert.ok(
+      team.overview().users.some((user) => user.username === "relaymember"),
+      "the account remains committed after the relay failure",
+    );
+  } finally {
+    sync?.close();
+    try {
+      team?.close();
+    } catch {
+      /* best effort */
+    }
+    if (relay) {
+      await new Promise<void>((resolve) => relay!.close(() => resolve()));
+    }
+    restoreHome(previousHome);
+    fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
+});
+
+test("sign-in refreshes a stale team directory before validating a newly added member", { timeout: 60_000 }, async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nexus-team-login-refresh-e2e-"));
+  const previousHome = process.env.NEXUS_PVE_HOME;
+  let relay: RelayHandle | undefined;
+  let ownerStation: TeamService | undefined;
+  let memberStation: TeamService | undefined;
+  let ownerSync: TeamSyncService | undefined;
+  let memberSync: TeamSyncService | undefined;
+
+  try {
+    relay = await startRelay(tempRoot);
+    ownerStation = await openTeam(path.join(tempRoot, "owner-station"));
+    await ownerStation.bootstrap({ username: "owner", displayName: "Morgan Lee", password: PASSWORD });
+    ownerStation.syncMachines([sshHost("edge-a", "Edge relay", EDGE_HOST), sshHost("gpu-a", "GPU worker", GPU_HOST)]);
+
+    ownerSync = new TeamSyncService(ownerStation, () => undefined, path.join(tempRoot, "sync-owner.json"));
+    await ownerSync.configure({
+      endpoint: relay.url,
+      token: TOKEN,
+      workspace: "login-refresh-e2e",
+      deviceName: "owner-station",
+    });
+
+    memberStation = await openTeam(path.join(tempRoot, "member-station"));
+    memberSync = new TeamSyncService(memberStation, () => undefined, path.join(tempRoot, "sync-member.json"));
+    await memberSync.configure({
+      endpoint: relay.url,
+      token: TOKEN,
+      workspace: "login-refresh-e2e",
+      deviceName: "member-station",
+    });
+    // Stop the 20-second poller so this test proves the sign-in refresh, not a
+    // background poll, is what makes the new account available.
+    memberSync.close();
+    assert.equal(
+      memberStation.syncSnapshot().users.some((user) => user.username === "newops"),
+      false,
+      "the member station starts without the account added later",
+    );
+
+    ownerStation.createUser({
+      username: "newops",
+      displayName: "New Operator",
+      role: "user",
+      password: PASSWORD,
+      grantAllMachines: true,
+    });
+    await ownerSync.syncNow();
+    assert.ok(
+      ownerStation.syncSnapshot().users.some((user) => user.username === "newops"),
+      "the owner published the new account to the relay",
+    );
+
+    const member = await loginWithFreshWorkspace(memberStation, memberSync, {
+      username: "newops",
+      password: PASSWORD,
+    });
+    assert.equal(member.username, "newops");
+    assert.equal(member.role, "user");
+    assert.deepEqual(machineHosts(memberStation.overview()), [EDGE_HOST, GPU_HOST]);
+  } finally {
+    for (const service of [ownerSync, memberSync]) {
+      try {
+        service?.close();
+      } catch {
+        /* best effort */
+      }
+    }
+    for (const service of [ownerStation, memberStation]) {
+      try {
+        service?.close();
+      } catch {
+        /* best effort */
+      }
+    }
+    if (relay) {
+      try {
+        await stopRelay(relay);
+      } catch {
+        /* best effort */
+      }
     }
     restoreHome(previousHome);
     fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
