@@ -318,6 +318,7 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
   ipcMain.handle(IPC.hostsSave, (_event, input: HostInput) => {
     requireOperator();
     const saved = store.saveHost({ ...input, baseUrl: normalizeBaseUrl(input.baseUrl) });
+    team.syncPveHosts(store.hosts());
     dropClient(saved.id);
     invalidate(saved.id);
     return saved;
@@ -327,6 +328,7 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
     requireOperator();
     const hostId = str(id, "host id");
     store.removeHost(hostId);
+    team.syncPveHosts(store.hosts());
     dropClient(hostId);
     invalidate(hostId);
   });

@@ -90,9 +90,19 @@ The result is a console for a small but real fleet: a Proxmox cluster, a few Lin
 
 ### Portable build
 
-Prebuilt portable artifacts are published on the repository's [Releases](../../releases) page. The latest build is [`v1.0.24`](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.24). The current source tree is `1.0.24`.
+Prebuilt portable artifacts are published on the repository's [Releases](../../releases) page. The latest build is [`v1.0.25`](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.25). The current source tree is `1.0.25`.
 
-The portable target is Windows 10/11 x64. It requires no installer and no system Node.js runtime. Verify the published download against the SHA-256 in the release notes; a local checkout that includes `NexusPVE-1.0.24-portable.exe` should match the published v1.0.24 hash.
+The portable target is Windows 10/11 x64. It requires no installer and no system Node.js runtime. Verify the published download against the SHA-256 in the release notes; a local checkout that includes `NexusPVE-1.0.25-portable.exe` should match the published v1.0.25 hash.
+
+### Release 1.0.25
+
+`1.0.25` fixes shared machine visibility for team members: a machine grant now shows the endpoint on every station, even before that station has local credentials.
+
+- **Workspace machines in Linux hosts** — Team SSH machines that are not configured on this computer appear under **Machines shared with you** with an **Add to this computer** action. Adding the endpoint keeps the existing grant, and the normal Linux hosts controls then work with the member's own key or password.
+- **Workspace Proxmox endpoints** — Proxmox API endpoints are now part of the team directory (without tokens) and appear under **Proxmox hosts shared with you**. A member adds the endpoint with their own API token; credentials never travel through the relay.
+- **Accurate team machine table** — Team access now distinguishes PVE endpoints from SSH hosts, shows the API URL for Proxmox rows, and routes Proxmox rows to Connections instead of the SSH drawer.
+- **Verification** — Typecheck, production build, `npm test` (4 edge tests, 7 team-access tests including the new PVE sync test, 1 team-panel test and 1 team-files relay test) and the packaged smoke test (13/13 checks, 84 MCP tools) pass.
+- **Asset** — [`NexusPVE-1.0.25-portable.exe`](https://github.com/nobody71004/nexus-pve/releases/download/v1.0.25/NexusPVE-1.0.25-portable.exe) (117,596,198 bytes), SHA-256 `8700f0ec0f26750d6e777a71978e6e37b6ccc2ef4264144ce6d09dd92da406bf`. It is unsigned.
 
 ### Release 1.0.24
 
@@ -297,7 +307,9 @@ reach a computer that has never connected to it.
 
 Joining imports accounts, roles, machine grants, chat and the billboard. It does not import SSH keys or stored host
 passwords; an admin can issue a per-member machine key from **SSH keys → Issue a machine key to a member**, or the
-member can add their own credentials on that station.
+member can add their own credentials on that station. From `1.0.25`, granted SSH and Proxmox endpoints also appear on
+the member's station under **Machines shared with you** / **Proxmox hosts shared with you**, with an **Add to this
+computer** action that keeps the existing grant and never imports a credential.
 
 If a station already created its own workspace by mistake, sign in to it, open **Team access → Sync**, enter the relay
 details, tick **Replace this computer's workspace** and choose **Join & replace this station**. Only that station's local

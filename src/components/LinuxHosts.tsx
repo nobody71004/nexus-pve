@@ -10,6 +10,7 @@ import type {
   SshRuntimeStatus,
   SshSnapshot,
   SshTestResult,
+  TeamMachine,
 } from "../../shared/types";
 import { bridge, isMockBridge } from "../lib/bridge";
 import { noteHelper } from "../lib/helperFleet";
@@ -148,6 +149,7 @@ export function LinuxHosts({
   const [statuses, setStatuses] = useState<Record<string, SshRuntimeStatus>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [workspace, setWorkspace] = useState<TeamMachine[]>([]);
   const [editing, setEditing] = useState<SshHostInput | null>(null);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -193,6 +195,15 @@ export function LinuxHosts({
     return list;
   }, []);
 
+  const loadWorkspace = useCallback(async () => {
+    try {
+      const overview = await bridge.team.overview();
+      setWorkspace(overview.machines.filter((machine) => machine.kind === "ssh"));
+    } catch {
+      // Team sync may be disabled; the local inventory still works.
+    }
+  }, []);
+
   const loadJournal = useCallback(async () => {
     try {
       setJournal(await bridge.security.journal(300));
@@ -215,6 +226,13 @@ export function LinuxHosts({
       cancelled.current = true;
     };
   }, [loadHosts]);
+
+  useEffect(() => {
+    void loadWorkspace();
+    return bridge.onEvent((event) => {
+      if (event.type === "team-sync") void loadWorkspace();
+    });
+  }, [loadWorkspace]);
 
   const refresh = useCallback(async (hostId: string, silent = false) => {
     if (!silent) setLoading(true);
@@ -318,6 +336,14 @@ export function LinuxHosts({
 
   const activeHost = useMemo(() => hosts.find((host) => host.id === activeId) ?? null, [hosts, activeId]);
   const helperStatus = activeHost ? helpers[activeHost.id] : undefined;
+  const workspaceSsh = useMemo(() => {
+    const local = new Set(
+      hosts.map((host) => `${host.host.trim().toLowerCase()}:${host.port}:${host.username.trim().toLowerCase()}`),
+    );
+    return workspace.filter(
+      (machine) => !local.has(`${machine.host.trim().toLowerCase()}:${machine.port}:${machine.username.trim().toLowerCase()}`),
+    );
+  }, [hosts, workspace]);
 
   const installHistory = useMemo(() => {
     const byHost = new Map<string, SecurityJournalEntry[]>();
@@ -353,6 +379,20 @@ export function LinuxHosts({
     });
   };
 
+  const adoptWorkspace = (machine: TeamMachine) => {
+    setResult(null);
+    setFormError(null);
+    setEditing({
+      label: machine.label,
+      host: machine.host,
+      port: machine.port,
+      username: machine.username,
+      authMode: "key",
+      keyPath: "",
+      password: "",
+    });
+  };
+
   const patch = (values: Partial<SshHostInput>) => setEditing((current) => (current ? { ...current, ...values } : current));
 
   const runTest = async () => {
@@ -376,6 +416,7 @@ export function LinuxHosts({
     try {
       const saved = await bridge.ssh.save(editing);
       await loadHosts();
+      void loadWorkspace();
       setActiveId(saved.id);
       setEditing(null);
       onToast("ok", "Linux host saved", `${saved.username}@${saved.host}:${saved.port}`);
@@ -843,6 +884,48 @@ export function LinuxHosts({
             ) : null}
           </div>
         </Panel>
+
+        {workspaceSsh.length > 0 ? (
+          <Panel
+            eyebrow="TEAM WORKSPACE"
+            title="Machines shared with you"
+            actions={<span className="hint small">Add once, then connect with your own credentials</span>}
+          >
+            <div className="host-cards">
+              {workspaceSsh.map((machine) => (
+                <article className="host-card" key={machine.id} data-spot>
+                  <header>
+                    <span className="host-color" style={{ background: machine.color }} />
+                    <div>
+                      <strong>{machine.label}</strong>
+                      <span className="mono subtle">
+                        {machine.username}@{machine.host}:{machine.port}
+                      </span>
+                    </div>
+                    <Chip tone="muted">workspace</Chip>
+                  </header>
+                  <div className="host-meta">
+                    <span>
+                      Source <b>{machine.source === "remote" ? "another station" : "this station"}</b>
+                    </span>
+                    <span>
+                      Grants <b>{machine.linkedUsers.length}</b>
+                    </span>
+                  </div>
+                  <p className="hint small">
+                    This endpoint is registered in the team directory but not on this computer yet. Add it here with
+                    your own SSH key or password, then it appears in Linux hosts and all normal controls work.
+                  </p>
+                  <footer>
+                    <button className="btn small primary" onClick={() => adoptWorkspace(machine)}>
+                      <Icon name="plus" size={12} /> Add to this computer
+                    </button>
+                  </footer>
+                </article>
+              ))}
+            </div>
+          </Panel>
+        ) : null}
 
         {activeHost ? (
           <>

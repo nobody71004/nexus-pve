@@ -1200,6 +1200,7 @@ function Workspace({
               currentUser={currentUser}
               onCurrentUserChange={onUserChange}
               onOpenHosts={() => setTab("hosts")}
+              onOpenConnections={() => setTab("connections")}
               onRefreshHosts={() => void refreshSshFleet()}
               onToast={notify}
             />

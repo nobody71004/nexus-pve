@@ -23,10 +23,14 @@ export interface TeamUser {
 
 export interface TeamMachine {
   id: string;
+  /** SSH hosts and Proxmox API endpoints share the same grant model. */
+  kind: "ssh" | "pve";
   label: string;
   host: string;
   port: number;
   username: string;
+  /** Proxmox API base URL. Present when kind is "pve". */
+  baseUrl?: string;
   color: string;
   /** Local machines are backed by this computer's SSH inventory. */
   source: "local" | "remote";

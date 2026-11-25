@@ -1012,6 +1012,7 @@ function mockTeamMachines(): TeamMachine[] {
       .map(({ id, username, displayName, role }) => ({ id, username, displayName, role }));
     return {
       id: host.id,
+      kind: "ssh",
       label: host.label,
       host: host.host,
       port: host.port,

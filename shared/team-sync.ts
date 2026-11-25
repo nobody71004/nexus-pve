@@ -56,8 +56,12 @@ export interface TeamSyncUser {
 }
 
 export interface TeamSyncMachine {
-  /** Stable workspace key: lower-case host + port + username. */
+  /** Stable workspace key: lower-case host + port + username, or pve:<baseUrl>. */
   key: string;
+  /** "ssh" is a Linux endpoint; "pve" is a Proxmox API endpoint. */
+  kind?: "ssh" | "pve";
+  /** Proxmox API base URL. Present when kind is "pve". */
+  baseUrl?: string;
   label: string;
   host: string;
   port: number;

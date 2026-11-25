@@ -223,6 +223,7 @@ app.whenReady().then(async () => {
     // Reconcile keys against this computer's current inventory, not a stale
     // team machine list that has not seen a just-added host yet.
     teamService.syncMachines(listSshHosts(runtime.store));
+    teamService.syncPveHosts(runtime.store.hosts());
     teamSync = new TeamSyncService(
       teamService,
       (status) => broadcast({ type: "team-sync", teamSync: status }),

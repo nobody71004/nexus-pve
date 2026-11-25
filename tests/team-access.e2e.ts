@@ -916,3 +916,92 @@ test("superadmin role matrix enforces promotion and admin/moderator boundaries",
     fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   }
 });
+
+test("Proxmox endpoints sync as workspace machines without credentials", { timeout: 60_000 }, async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nexus-team-pve-e2e-"));
+  const previousHome = process.env.NEXUS_PVE_HOME;
+  let teamA: TeamService | undefined;
+  let teamB: TeamService | undefined;
+
+  try {
+    teamA = await openTeam(path.join(tempRoot, "pve-a"));
+    await teamA.bootstrap({ username: "owner", displayName: "PVE Owner", password: PASSWORD });
+    teamA.syncMachines([sshHost("pve-edge", "Edge relay", EDGE_HOST)]);
+    teamA.syncPveHosts([
+      {
+        id: "pve-cynosure",
+        label: "Cynosure",
+        baseUrl: "https://10.42.0.86:8006",
+        authMode: "token",
+        tlsVerify: false,
+        color: "#ffaa00",
+        hasSecret: true,
+        createdAt: Date.now(),
+      },
+    ]);
+
+    let overview = teamA.overview();
+    const pve = overview.machines.find((machine) => machine.kind === "pve");
+    assert.ok(pve, "the Proxmox endpoint is in the workspace directory");
+    assert.equal(pve.baseUrl, "https://10.42.0.86:8006");
+    const member = userByName(
+      teamA.createUser({ username: "member", displayName: "PVE Member", role: "user", password: PASSWORD }),
+      "member",
+    );
+    overview = teamA.setUserMachineLinks(member.id, [pve.id]);
+    const pveAfterGrant = overview.machines.find((machine) => machine.kind === "pve");
+    assert.ok(pveAfterGrant?.linkedUserIds.includes(member.id), "the member grant is recorded on the Proxmox entry");
+
+    const snapshotA = teamA.syncSnapshot();
+    const syncedPve = snapshotA.machines.find((machine) => machine.kind === "pve");
+    assert.ok(syncedPve, "the Proxmox endpoint is published to the relay snapshot");
+    assert.equal(syncedPve.key, "pve:https://10.42.0.86:8006");
+    assert.deepEqual(syncedPve.linkedUsernames, ["member"]);
+    assert.equal("secret" in syncedPve, false, "credentials never travel in the snapshot");
+
+    teamB = await openTeam(path.join(tempRoot, "pve-b"));
+    teamB.applySyncSnapshot(snapshotA);
+    let snapshotB = teamB.syncSnapshot();
+    const remotePve = snapshotB.machines.find((machine) => machine.kind === "pve");
+    assert.ok(remotePve, "another station receives the Proxmox endpoint");
+    assert.deepEqual(remotePve.linkedUsernames, ["member"]);
+
+    teamB.syncMachines([]);
+    snapshotB = teamB.syncSnapshot();
+    assert.ok(
+      snapshotB.machines.some((machine) => machine.kind === "pve"),
+      "an SSH inventory refresh must not delete a workspace Proxmox endpoint",
+    );
+
+    teamB.syncPveHosts([
+      {
+        id: "local-pve",
+        label: "Cynosure local",
+        baseUrl: "https://10.42.0.86:8006",
+        authMode: "token",
+        tlsVerify: false,
+        color: "#ffaa00",
+        hasSecret: true,
+        createdAt: Date.now(),
+      },
+    ]);
+    const adopted = teamB.syncSnapshot().machines.filter((machine) => machine.kind === "pve");
+    assert.equal(adopted.length, 1, "adding the endpoint locally adopts the workspace row");
+    assert.equal(adopted[0].label, "Cynosure local");
+    assert.deepEqual(adopted[0].linkedUsernames, ["member"], "the grant survives adoption");
+    assert.equal("secret" in adopted[0], false);
+  } finally {
+    try {
+      teamA?.close();
+    } catch {
+      /* best effort */
+    }
+    try {
+      teamB?.close();
+    } catch {
+      /* best effort */
+    }
+    restoreHome(previousHome);
+    fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
+});

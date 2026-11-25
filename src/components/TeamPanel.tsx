@@ -76,12 +76,14 @@ export function TeamPanel({
   currentUser,
   onCurrentUserChange,
   onOpenHosts,
+  onOpenConnections,
   onRefreshHosts,
   onToast,
 }: {
   currentUser: TeamUser;
   onCurrentUserChange: (user: TeamUser) => void;
   onOpenHosts: () => void;
+  onOpenConnections?: () => void;
   onRefreshHosts: () => void;
   onToast: Toast;
 }) {
@@ -452,14 +454,19 @@ export function TeamPanel({
                             <div className="team-machine">
                               <span className="machine-mark" style={{ background: machine.color }} />
                               <div>
-                                <strong>{machine.label}</strong>
+                                <strong>
+                                  {machine.label}
+                                  {machine.kind === "pve" ? <Chip tone="muted">PVE</Chip> : null}
+                                </strong>
                                 <span className="mono">{machine.id}</span>
                               </div>
                             </div>
                           </td>
                           <td>
                             <span className="mono subtle">
-                              {machine.username}@{machine.host}:{machine.port}
+                              {machine.kind === "pve"
+                                ? machine.baseUrl
+                                : `${machine.username}@${machine.host}:${machine.port}`}
                             </span>
                           </td>
                           <td>
@@ -483,7 +490,11 @@ export function TeamPanel({
                           </td>
                           <td>
                             <div className="table-actions">
-                              {!isMember ? (
+                              {machine.kind === "pve" ? (
+                                <button className="btn small ghost" onClick={onOpenConnections ?? onOpenHosts}>
+                                  <Icon name="server" size={12} /> Open connections
+                                </button>
+                              ) : !isMember ? (
                                 <button
                                   className="btn small ghost"
                                   onClick={() => setAdminMachine(machine)}
@@ -749,7 +760,9 @@ export function TeamPanel({
                           <div>
                             <strong>{machine.label}</strong>
                             <span className="mono">
-                              {machine.username}@{machine.host}:{machine.port}
+                              {machine.kind === "pve"
+                                ? machine.baseUrl
+                                : `${machine.username}@${machine.host}:${machine.port}`}
                             </span>
                           </div>
                           <Chip tone="ok">linked</Chip>
@@ -806,7 +819,7 @@ export function TeamPanel({
         />
       ) : null}
 
-      {adminMachine && overview ? (
+      {adminMachine && adminMachine.kind !== "pve" && overview ? (
         <ServerDrawer
           key={adminMachine.id}
           machine={adminMachine}
@@ -821,7 +834,7 @@ export function TeamPanel({
         />
       ) : null}
 
-      {keyMachine ? (
+      {keyMachine && keyMachine.kind !== "pve" ? (
         <MachineKeyDialog machine={keyMachine} onClose={() => setKeyMachine(null)} onToast={onToast} />
       ) : null}
 
@@ -1198,7 +1211,9 @@ function MemberDialog({
                   <span className="member-pick-copy">
                     <strong>{machine.label}</strong>
                     <span className="mono">
-                      {machine.username}@{machine.host}:{machine.port}
+                      {machine.kind === "pve"
+                        ? machine.baseUrl
+                        : `${machine.username}@${machine.host}:${machine.port}`}
                     </span>
                   </span>
                   <span className="mono subtle">{machine.linkedUsers.length}</span>

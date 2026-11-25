@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import initSqlJs from "sql.js";
 import type { Database, SqlValue } from "sql.js";
-import type { SshHostSummary } from "../../shared/types";
+import type { HostSummary, SshHostSummary } from "../../shared/types";
 import type {
   TeamActivityEntry,
   TeamAuthState,
@@ -114,6 +114,25 @@ function roleLabel(role: TeamRole): string {
 
 function machineKey(host: string, port: number, username: string): string {
   return `${host.trim().toLowerCase()}:${port}:${username.trim().toLowerCase()}`;
+}
+
+function normalizePveBaseUrl(value: string): string {
+  return value.trim().replace(/\/+$/, "").toLowerCase();
+}
+
+/** Workspace key for either an SSH endpoint or a Proxmox API endpoint. */
+function machineSyncKey(row: Record<string, unknown>): string {
+  if (String(row.kind ?? "ssh") === "pve") return `pve:${normalizePveBaseUrl(String(row.base_url ?? ""))}`;
+  return machineKey(String(row.host), Number(row.port), String(row.username));
+}
+
+function pveEndpoint(baseUrl: string): { host: string; port: number } {
+  try {
+    const url = new URL(baseUrl.trim());
+    return { host: url.hostname, port: Number(url.port) || 8006 };
+  } catch {
+    return { host: baseUrl.trim(), port: 8006 };
+  }
 }
 
 function normalizeChatBody(value: unknown): string {
@@ -344,6 +363,8 @@ export class TeamService {
     `);
     this.ensureColumn("machines", "source", "TEXT NOT NULL DEFAULT 'local'");
     this.ensureColumn("machines", "links_updated_at", "INTEGER NOT NULL DEFAULT 0");
+    this.ensureColumn("machines", "kind", "TEXT NOT NULL DEFAULT 'ssh'");
+    this.ensureColumn("machines", "base_url", "TEXT");
     this.db.run("CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id)");
     this.db.run("CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at)");
     this.db.run("CREATE INDEX IF NOT EXISTS links_machine ON machine_links(machine_id)");
@@ -1013,12 +1034,12 @@ export class TeamService {
 
   removeMachine(machineId: string, actor: TeamUser): void {
     if (actor.role === "user") throw new Error("Admin or moderator access required.");
-    const machine = this.one("SELECT label, host, port, username FROM machines WHERE id = ?", [machineId]);
+    const machine = this.one("SELECT label, kind, base_url, host, port, username FROM machines WHERE id = ?", [machineId]);
     if (!machine) return;
     const now = Date.now();
     this.transaction(() => {
       this.run("INSERT OR REPLACE INTO sync_machine_tombstones (key, deleted_at) VALUES (?, ?)", [
-        machineKey(String(machine.host), Number(machine.port), String(machine.username)),
+        machineSyncKey(machine),
         now,
       ]);
       this.run("DELETE FROM machine_links WHERE machine_id = ?", [machineId]);
@@ -1174,10 +1195,11 @@ export class TeamService {
     const now = Date.now();
     let changed = false;
     const hostIds = new Set(hosts.map((host) => host.id));
-    for (const row of this.all("SELECT id, source, host, port, username FROM machines")) {
+    for (const row of this.all("SELECT id, source, kind, host, port, username FROM machines")) {
       const id = String(row.id);
       if (hostIds.has(id)) continue;
       if (String(row.source) === "remote") continue;
+      if (String(row.kind ?? "ssh") !== "ssh") continue;
       this.run("INSERT OR REPLACE INTO sync_machine_tombstones (key, deleted_at) VALUES (?, ?)", [
         machineKey(String(row.host), Number(row.port), String(row.username)),
         now,
@@ -1192,7 +1214,7 @@ export class TeamService {
         // A machine synced from another computer becomes local when this
         // computer adds the same endpoint. Carry its grants across.
         const remote = this.one(
-          "SELECT * FROM machines WHERE lower(host) = ? AND port = ? AND lower(username) = ? AND source = 'remote'",
+          "SELECT * FROM machines WHERE lower(host) = ? AND port = ? AND lower(username) = ? AND source = 'remote' AND kind = 'ssh'",
           [host.host.toLowerCase(), host.port, host.username.toLowerCase()],
         );
         if (remote) {
@@ -1214,7 +1236,7 @@ export class TeamService {
         // here would make grants pulled from another computer look stale and
         // they would never be applied.
         this.run(
-          "INSERT INTO machines (id, label, host, port, username, color, updated_at, source, links_updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'local', 0)",
+          "INSERT INTO machines (id, label, host, port, username, color, updated_at, source, links_updated_at, kind, base_url) VALUES (?, ?, ?, ?, ?, ?, ?, 'local', 0, 'ssh', NULL)",
           [host.id, host.label, host.host, host.port, host.username, host.color, now],
         );
         changed = true;
@@ -1236,6 +1258,73 @@ export class TeamService {
           now,
           host.id,
         ]);
+        changed = true;
+      }
+    }
+    if (changed) this.persist();
+  }
+
+  /**
+   * Mirror the local Proxmox endpoints into the workspace directory without
+   * exporting credentials. Members see the endpoint and can add it to their
+   * own station with their own API token.
+   */
+  syncPveHosts(hosts: HostSummary[]): void {
+    const now = Date.now();
+    let changed = false;
+    const wanted = new Map<string, HostSummary>();
+    for (const host of hosts) {
+      const baseUrl = host.baseUrl.trim().replace(/\/+$/, "");
+      if (!baseUrl) continue;
+      wanted.set(normalizePveBaseUrl(baseUrl), { ...host, baseUrl });
+    }
+    for (const row of this.all("SELECT id, source, kind, base_url FROM machines WHERE kind = 'pve'")) {
+      const key = `pve:${normalizePveBaseUrl(String(row.base_url ?? ""))}`;
+      if (wanted.has(normalizePveBaseUrl(String(row.base_url ?? "")))) continue;
+      if (String(row.source) === "remote") continue;
+      this.run("INSERT OR REPLACE INTO sync_machine_tombstones (key, deleted_at) VALUES (?, ?)", [key, now]);
+      this.run("DELETE FROM machine_links WHERE machine_id = ?", [String(row.id)]);
+      this.run("DELETE FROM machines WHERE id = ?", [String(row.id)]);
+      changed = true;
+    }
+    for (const [key, host] of wanted) {
+      const endpoint = pveEndpoint(host.baseUrl);
+      let existing = this.one("SELECT * FROM machines WHERE id = ?", [host.id]);
+      let carriedLinksUpdatedAt = 0;
+      if (!existing) {
+        // A Proxmox endpoint synced from another station becomes local when
+        // this station adds the same API URL. Carry its grants across.
+        const remote = this.one(
+          "SELECT * FROM machines WHERE kind = 'pve' AND source = 'remote' AND lower(base_url) = ?",
+          [normalizePveBaseUrl(host.baseUrl)],
+        );
+        if (remote) {
+          const remoteId = String(remote.id);
+          carriedLinksUpdatedAt = Number(remote.links_updated_at) || 0;
+          this.run("UPDATE machine_links SET machine_id = ? WHERE machine_id = ?", [host.id, remoteId]);
+          this.run("DELETE FROM machines WHERE id = ?", [remoteId]);
+          existing = this.one("SELECT * FROM machines WHERE id = ?", [host.id]);
+        }
+      }
+      if (!existing) {
+        this.run(
+          "INSERT INTO machines (id, label, host, port, username, color, updated_at, source, links_updated_at, kind, base_url) VALUES (?, ?, ?, ?, '', ?, ?, 'local', ?, 'pve', ?)",
+          [host.id, host.label, endpoint.host, endpoint.port, host.color, now, carriedLinksUpdatedAt, host.baseUrl],
+        );
+        changed = true;
+        continue;
+      }
+      if (
+        String(existing.label) !== host.label ||
+        String(existing.host) !== endpoint.host ||
+        Number(existing.port) !== endpoint.port ||
+        String(existing.color) !== host.color ||
+        String(existing.base_url ?? "") !== host.baseUrl
+      ) {
+        this.run(
+          "UPDATE machines SET label = ?, host = ?, port = ?, color = ?, updated_at = ?, source = 'local', kind = 'pve', base_url = ? WHERE id = ?",
+          [host.label, endpoint.host, endpoint.port, host.color, now, host.baseUrl, host.id],
+        );
         changed = true;
       }
     }
@@ -1509,7 +1598,9 @@ export class TeamService {
       links.set(id, [...(links.get(id) ?? []), String(row.username)]);
     }
     const machines: TeamSyncMachine[] = this.all("SELECT * FROM machines ORDER BY label COLLATE NOCASE").map((row) => ({
-      key: machineKey(String(row.host), Number(row.port), String(row.username)),
+      key: machineSyncKey(row),
+      kind: String(row.kind ?? "ssh") === "pve" ? ("pve" as const) : ("ssh" as const),
+      baseUrl: row.base_url === null || row.base_url === undefined ? undefined : String(row.base_url),
       label: String(row.label),
       host: String(row.host),
       port: Number(row.port),
@@ -1636,8 +1727,8 @@ export class TeamService {
         machineTombstones.set(key, deletedAt);
         this.run("INSERT OR REPLACE INTO sync_machine_tombstones (key, deleted_at) VALUES (?, ?)", [key, deletedAt]);
       }
-      for (const row of this.all("SELECT id, host, port, username, updated_at FROM machines")) {
-        const key = machineKey(String(row.host), Number(row.port), String(row.username));
+      for (const row of this.all("SELECT id, kind, base_url, host, port, username, updated_at FROM machines")) {
+        const key = machineSyncKey(row);
         const deletedAt = machineTombstones.get(key) ?? 0;
         if (deletedAt === 0 || deletedAt < Number(row.updated_at)) continue;
         this.run("DELETE FROM machine_links WHERE machine_id = ?", [String(row.id)]);
@@ -1693,37 +1784,50 @@ export class TeamService {
       }
 
       for (const machine of remote.machines ?? []) {
+        const kind = machine.kind === "pve" ? "pve" : "ssh";
         const key = String(machine.key || "").trim();
         if (!key) continue;
+        const baseUrl = kind === "pve" ? String(machine.baseUrl ?? "").trim().replace(/\/+$/, "") : "";
+        if (kind === "pve" && !baseUrl) continue;
         const deletedAt = machineTombstones.get(key.toLowerCase()) ?? 0;
         if (deletedAt >= Number(machine.updatedAt)) continue;
-        const existing = this.one(
-          "SELECT * FROM machines WHERE lower(host) = ? AND port = ? AND lower(username) = ?",
-          [machine.host.trim().toLowerCase(), Number(machine.port), machine.username.trim().toLowerCase()],
-        );
+        const existing =
+          kind === "pve"
+            ? this.one("SELECT * FROM machines WHERE kind = 'pve' AND lower(base_url) = ?", [
+                normalizePveBaseUrl(baseUrl),
+              ])
+            : this.one(
+                "SELECT * FROM machines WHERE lower(host) = ? AND port = ? AND lower(username) = ? AND kind = 'ssh'",
+                [machine.host.trim().toLowerCase(), Number(machine.port), machine.username.trim().toLowerCase()],
+              );
         let machineId: string;
         if (!existing) {
           machineId = uid();
+          const endpoint = kind === "pve" ? pveEndpoint(baseUrl) : { host: machine.host, port: Number(machine.port) || 22 };
           this.run(
-            "INSERT INTO machines (id, label, host, port, username, color, updated_at, source, links_updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'remote', ?)",
+            "INSERT INTO machines (id, label, host, port, username, color, updated_at, source, links_updated_at, kind, base_url) VALUES (?, ?, ?, ?, ?, ?, ?, 'remote', ?, ?, ?)",
             [
               machineId,
-              machine.label || machine.host,
-              machine.host,
-              Number(machine.port) || 22,
-              machine.username,
+              machine.label || (kind === "pve" ? baseUrl : machine.host),
+              endpoint.host,
+              endpoint.port,
+              kind === "pve" ? "" : machine.username,
               machine.color || "#38f2ff",
               Number(machine.updatedAt) || Date.now(),
               Number(machine.linksUpdatedAt) || 0,
+              kind,
+              kind === "pve" ? baseUrl : null,
             ],
           );
         } else {
           machineId = String(existing.id);
           if (Number(machine.updatedAt) > Number(existing.updated_at)) {
-            this.run("UPDATE machines SET label = ?, color = ?, updated_at = ? WHERE id = ?", [
+            this.run("UPDATE machines SET label = ?, color = ?, updated_at = ?, kind = ?, base_url = ? WHERE id = ?", [
               machine.label || String(existing.label),
               machine.color || String(existing.color),
               Number(machine.updatedAt),
+              kind,
+              kind === "pve" ? baseUrl : null,
               machineId,
             ]);
           }
@@ -1896,10 +2000,12 @@ export class TeamService {
         const linkedUsers = links.get(id) ?? [];
         return {
           id,
+          kind: String(row.kind ?? "ssh") === "pve" ? ("pve" as const) : ("ssh" as const),
           label: String(row.label),
           host: String(row.host),
           port: Number(row.port),
           username: String(row.username),
+          baseUrl: row.base_url === null || row.base_url === undefined ? undefined : String(row.base_url),
           color: String(row.color),
           source: String(row.source) === "remote" ? ("remote" as const) : ("local" as const),
           linkedUserIds: linkedUsers.map((user) => user.id),

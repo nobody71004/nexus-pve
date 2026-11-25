@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type {
   AppInfo,
   HelperState,
@@ -11,6 +11,7 @@ import type {
   SshHostSummary,
   SshRuntimeStatus,
   SshTestResult,
+  TeamMachine,
 } from "../../shared/types";
 import { bridge } from "../lib/bridge";
 import { ago, cx } from "../lib/format";
@@ -89,6 +90,7 @@ export function ConnectPanel({
   const [sshSaving, setSshSaving] = useState(false);
   const [sshTestResult, setSshTestResult] = useState<SshTestResult | null>(null);
   const [sshFormError, setSshFormError] = useState<string | null>(null);
+  const [workspace, setWorkspace] = useState<TeamMachine[]>([]);
   const helperState = useSyncExternalStore(subscribeHelpers, helperFleet);
 
   const loadSsh = useCallback(async () => {
@@ -120,6 +122,42 @@ export function ConnectPanel({
       window.clearInterval(timer);
     };
   }, [loadSsh]);
+
+  const loadWorkspace = useCallback(async () => {
+    try {
+      setWorkspace((await bridge.team.overview()).machines);
+    } catch {
+      // Team sync may not be configured on this station.
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadWorkspace();
+    return bridge.onEvent((event) => {
+      if (event.type === "team-sync") void loadWorkspace();
+    });
+  }, [loadWorkspace]);
+
+  const workspacePve = useMemo(() => {
+    const local = new Set(hosts.map((host) => host.baseUrl.trim().replace(/\/+$/, "").toLowerCase()));
+    return workspace.filter(
+      (machine) =>
+        machine.kind === "pve" &&
+        machine.baseUrl &&
+        !local.has(machine.baseUrl.trim().replace(/\/+$/, "").toLowerCase()),
+    );
+  }, [hosts, workspace]);
+
+  const workspaceSsh = useMemo(() => {
+    const local = new Set(
+      sshHosts.map((host) => `${host.host.trim().toLowerCase()}:${host.port}:${host.username.trim().toLowerCase()}`),
+    );
+    return workspace.filter(
+      (machine) =>
+        machine.kind === "ssh" &&
+        !local.has(`${machine.host.trim().toLowerCase()}:${machine.port}:${machine.username.trim().toLowerCase()}`),
+    );
+  }, [sshHosts, workspace]);
 
   const patch = (values: Partial<HostInput>) => setEditing((current) => (current ? { ...current, ...values } : current));
 
@@ -197,6 +235,36 @@ export function ConnectPanel({
     }
   };
 
+  const adoptPve = (machine: TeamMachine) => {
+    setSshEditing(null);
+    setResult(null);
+    setError(null);
+    setEditing({
+      label: machine.label,
+      baseUrl: machine.baseUrl ?? "",
+      authMode: "token",
+      tokenId: "",
+      username: "root@pam",
+      tlsVerify: false,
+      secret: "",
+    });
+  };
+
+  const adoptSsh = (machine: TeamMachine) => {
+    setEditing(null);
+    setSshTestResult(null);
+    setSshFormError(null);
+    setSshEditing({
+      label: machine.label,
+      host: machine.host,
+      port: machine.port,
+      username: machine.username,
+      authMode: "key",
+      keyPath: "",
+      password: "",
+    });
+  };
+
   const saveSsh = async () => {
     if (!sshEditing) return;
     setSshSaving(true);
@@ -206,6 +274,7 @@ export function ConnectPanel({
       setSshEditing(null);
       setSshTestResult(null);
       await loadSsh();
+      void loadWorkspace();
     } catch (err) {
       setSshFormError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -283,6 +352,46 @@ export function ConnectPanel({
             ) : null}
           </div>
         </Panel>
+
+        {workspacePve.length > 0 ? (
+          <Panel
+            eyebrow="TEAM WORKSPACE"
+            title="Proxmox hosts shared with you"
+            actions={<span className="hint small">Add once with your own API token</span>}
+          >
+            <div className="host-cards">
+              {workspacePve.map((machine) => (
+                <article className="host-card" key={machine.id} data-spot>
+                  <header>
+                    <span className="host-color" style={{ background: machine.color }} />
+                    <div>
+                      <strong>{machine.label}</strong>
+                      <span className="mono subtle">{machine.baseUrl}</span>
+                    </div>
+                    <Chip tone="muted">workspace</Chip>
+                  </header>
+                  <div className="host-meta">
+                    <span>
+                      Source <b>{machine.source === "remote" ? "another station" : "this station"}</b>
+                    </span>
+                    <span>
+                      Grants <b>{machine.linkedUsers.length}</b>
+                    </span>
+                  </div>
+                  <p className="hint small">
+                    The API endpoint is registered in the team directory. Add it here, then enter a Proxmox API token
+                    created for your account — credentials never travel through the relay.
+                  </p>
+                  <footer>
+                    <button className="btn small primary" onClick={() => adoptPve(machine)}>
+                      <Icon name="plus" size={12} /> Add to this computer
+                    </button>
+                  </footer>
+                </article>
+              ))}
+            </div>
+          </Panel>
+        ) : null}
 
         <Panel
           eyebrow="SSH FLEET"
@@ -373,6 +482,48 @@ export function ConnectPanel({
             {sshError && sshHosts.length > 0 ? <p className="inline-error">{sshError}</p> : null}
           </div>
         </Panel>
+
+        {workspaceSsh.length > 0 ? (
+          <Panel
+            eyebrow="TEAM WORKSPACE"
+            title="Linux machines shared with you"
+            actions={<span className="hint small">Add once with your own SSH key or password</span>}
+          >
+            <div className="host-cards">
+              {workspaceSsh.map((machine) => (
+                <article className="host-card" key={machine.id} data-spot>
+                  <header>
+                    <span className="host-color" style={{ background: machine.color }} />
+                    <div>
+                      <strong>{machine.label}</strong>
+                      <span className="mono subtle">
+                        {machine.username}@{machine.host}:{machine.port}
+                      </span>
+                    </div>
+                    <Chip tone="muted">workspace</Chip>
+                  </header>
+                  <div className="host-meta">
+                    <span>
+                      Source <b>{machine.source === "remote" ? "another station" : "this station"}</b>
+                    </span>
+                    <span>
+                      Grants <b>{machine.linkedUsers.length}</b>
+                    </span>
+                  </div>
+                  <p className="hint small">
+                    This endpoint is registered in the team directory but not on this computer yet. Add it with your
+                    own credentials to open it in Linux hosts.
+                  </p>
+                  <footer>
+                    <button className="btn small primary" onClick={() => adoptSsh(machine)}>
+                      <Icon name="plus" size={12} /> Add to this computer
+                    </button>
+                  </footer>
+                </article>
+              ))}
+            </div>
+          </Panel>
+        ) : null}
 
         <Panel eyebrow="SECURITY" title="How credentials are handled">
           <ul className="security-list">
