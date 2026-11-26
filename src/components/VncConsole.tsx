@@ -14,12 +14,10 @@ function readableError(err: unknown): string {
   return message.replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/, "");
 }
 
-/** Foot's font-increase/decrease/reset shortcuts, sent through RFB. */
-const FONT_KEYS = {
-  increase: { keysym: 0xffab, code: "Equal" },
-  decrease: { keysym: 0xffad, code: "Minus" },
-  reset: { keysym: 0x30, code: "Digit0" },
-} as const;
+/** Console zoom limits. 1 = fit the whole desktop into the panel. */
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 4;
+const ZOOM_STEP = 0.25;
 
 /**
  * A real RFB console inside the renderer. The WebSocket is bound to loopback
@@ -48,6 +46,9 @@ export function VncConsole({
   const passwordRef = useRef("");
   const [showPassword, setShowPassword] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  // Client-side zoom of the RFB canvas. Unlike a key sent into the guest this
+  // works on every host, whatever terminal or desktop is running there.
+  const [zoom, setZoom] = useState(1);
   const [preflight, setPreflight] = useState<VncPreflight | null>(null);
   const [preflightState, setPreflightState] = useState<"idle" | "checking" | "done">("idle");
   const [setupState, setSetupState] = useState<SetupState>("idle");
@@ -92,6 +93,7 @@ export function VncConsole({
     setSudoPassword("");
     sudoRef.current = "";
     setShowSudo(false);
+    setZoom(1);
   }, [host.id]);
 
   // Probe the host before opening the tunnel so the console starts on the port
@@ -278,16 +280,14 @@ export function VncConsole({
     };
   }, [host.id, port, attempt, preflightState, preflight, onToast, teardown]);
 
-  const sendFontKey = (key: keyof typeof FONT_KEYS) => {
+  // The zoom factor sizes the element noVNC scales the framebuffer into, so the
+  // whole desktop (text included) grows instead of being shrunk to fit. Setting
+  // scaleViewport again makes noVNC re-measure the resized target immediately.
+  useEffect(() => {
     const rfb = rfbRef.current;
-    if (!rfb || state !== "connected") return;
-    const target = FONT_KEYS[key];
-    rfb.sendKey(0xffe3, "ControlLeft", true);
-    rfb.sendKey(target.keysym, target.code, true);
-    rfb.sendKey(target.keysym, target.code, false);
-    rfb.sendKey(0xffe3, "ControlLeft", false);
-    rfb.focus();
-  };
+    if (!rfb) return;
+    rfb.scaleViewport = true;
+  }, [zoom]);
 
   if (isMockBridge) {
     return (
@@ -321,16 +321,29 @@ export function VncConsole({
             onChange={(event) => setPort(Math.max(1, Math.min(65535, Number(event.target.value) || 5900)))}
           />
         </label>
-        <div className="vnc-text" role="group" aria-label="Terminal font size">
-          <button type="button" className="vnc-font" onClick={() => sendFontKey("decrease")} disabled={state !== "connected"} title="Decrease terminal font (Ctrl+minus; foot terminal)">
+        <div className="vnc-text" role="group" aria-label="Console zoom">
+          <button
+            type="button"
+            className="vnc-font"
+            onClick={() => setZoom((value) => Math.max(ZOOM_MIN, Math.round((value - ZOOM_STEP) * 100) / 100))}
+            disabled={zoom <= ZOOM_MIN}
+            title="Zoom out (100% fits the whole desktop in the panel)"
+          >
             A−
           </button>
-          <button type="button" className="vnc-font" onClick={() => sendFontKey("increase")} disabled={state !== "connected"} title="Increase terminal font (Ctrl+plus; foot terminal)">
+          <button
+            type="button"
+            className="vnc-font"
+            onClick={() => setZoom((value) => Math.min(ZOOM_MAX, Math.round((value + ZOOM_STEP) * 100) / 100))}
+            disabled={zoom >= ZOOM_MAX}
+            title="Zoom in — enlarges the whole remote desktop, including terminal text, on any host"
+          >
             A+
           </button>
-          <button type="button" className="vnc-font reset" onClick={() => sendFontKey("reset")} disabled={state !== "connected"} title="Reset terminal font (Ctrl+0; foot terminal)">
+          <button type="button" className="vnc-font reset" onClick={() => setZoom(1)} disabled={zoom === 1} title="Fit the desktop to the panel (100%)">
             A0
           </button>
+          <span className="vnc-zoom-readout mono">{Math.round(zoom * 100)}%</span>
         </div>
         {showPassword ? (
           <input
@@ -375,13 +388,16 @@ export function VncConsole({
       ) : null}
 
       <div className="vnc-screen">
-        <div
-          className="vnc-target"
-          ref={screenRef}
-          tabIndex={0}
-          aria-label={`VNC console for ${host.label}`}
-          onMouseDown={() => rfbRef.current?.focus()}
-        />
+        <div className="vnc-scroll">
+          <div
+            className="vnc-target"
+            ref={screenRef}
+            tabIndex={0}
+            aria-label={`VNC console for ${host.label}`}
+            style={{ width: `${zoom * 100}%`, height: `${zoom * 100}%` }}
+            onMouseDown={() => rfbRef.current?.focus()}
+          />
+        </div>
         {state !== "connected" ? (
           <div className={cx("vnc-status", state === "error" && !installing && !noListener && "error")}>
             {installing ? (
@@ -472,7 +488,8 @@ export function VncConsole({
       </div>
       <p className="hint vnc-hint">
         RFB travels through SSH and a loopback-only WebSocket. Auto-install keeps the daemon on 127.0.0.1; never expose 5900
-        publicly. A− / A+ / A0 change the terminal font once the console is live.
+        publicly. A− / A+ / A0 zoom the console itself, so text stays readable on every host regardless of which terminal or
+        desktop it runs — scroll to pan once you are above 100%.
       </p>
     </div>
   );

@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="License: GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-2ea44f?style=flat-square" /></a>
   <img alt="Platform: Windows 10/11 x64" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0a84ff?style=flat-square" />
   <img alt="Edge runtime: Python 3.10+ and nftables" src="https://img.shields.io/badge/edge-Python%203.10%2B%20%2B%20nftables-7c5cff?style=flat-square" />
-  <img alt="Version 1.0.26" src="https://img.shields.io/badge/version-1.0.26-3ddc97?style=flat-square" />
+  <img alt="Version 1.0.27" src="https://img.shields.io/badge/version-1.0.27-3ddc97?style=flat-square" />
 </p>
 
 > **Documentation image:** the hero uses documentation addresses from the RFC 5737 ranges. It does not show a live edge address. The project ships with fictional demo data and no credentials, private keys, or real infrastructure addresses.
@@ -73,7 +73,7 @@ The result is a console for a small but real fleet: a Proxmox cluster, a few Lin
 
 | Area | Implementation |
 | --- | --- |
-| Product | Nexus PVE `1.0.26` |
+| Product | Nexus PVE `1.0.27` |
 | Desktop shell | Electron 45, React 18, TypeScript, Vite |
 | Desktop target | Windows 10/11 x64 portable executable |
 | Proxmox access | HTTPS API with token or password authentication, optional TLS verification |
@@ -90,9 +90,20 @@ The result is a console for a small but real fleet: a Proxmox cluster, a few Lin
 
 ### Portable build
 
-Prebuilt portable artifacts are published on the repository's [Releases](../../releases) page. The latest build is [`v1.0.26`](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.26). The current source tree is `1.0.26`.
+Prebuilt portable artifacts are published on the repository's [Releases](../../releases) page. The latest build is [`v1.0.27`](https://github.com/nobody71004/nexus-pve/releases/tag/v1.0.27). The current source tree is `1.0.27`.
 
-The portable target is Windows 10/11 x64. It requires no installer and no system Node.js runtime. Verify the published download against the SHA-256 in the release notes; a local checkout that includes `NexusPVE-1.0.26-portable.exe` should match the published v1.0.26 hash.
+The portable target is Windows 10/11 x64. It requires no installer and no system Node.js runtime. Verify the published download against the SHA-256 in the release notes; a local checkout that includes `NexusPVE-1.0.27-portable.exe` should match the published v1.0.27 hash.
+
+### Release 1.0.27
+
+`1.0.27` fixes a Linux-only workspace end to end: the fleet overview renders without a Proxmox endpoint, the title-bar link state follows the SSH fleet, and the VNC console zooms so terminal text is readable on every host.
+
+- **Fleet overview without Proxmox** — `activeHostId` comes from the Proxmox host list, so with zero endpoints the whole overview deck was replaced by the "Connect your first Proxmox endpoint" empty state, including the Linux servers panel. The deck now renders whenever SSH servers are configured.
+- **Link state that reflects the fleet** — The badge beside the clock fell back to a literal `OFFLINE` with no Proxmox snapshot. It now follows the SSH probes: `online` while at least one server answers, `connecting` before the first poll finishes, and `offline` only when every polled server has failed.
+- **VNC console zoom** — `A−` / `A+` / `A0` sent `Ctrl+minus` / `Ctrl+plus` / `Ctrl+0` into the guest, a `foot` shortcut that does nothing on the TigerVNC + xterm fallback. They now zoom the console from 100 % to 400 % in 25 % steps, scaling the whole remote desktop on any host, with scrollbars to pan above 100 %.
+- **Readable console at 100 %** — The screen was a fixed 300 px box that always fitted a 1280×800 framebuffer into it (about 23 % scale). It is now `clamp(320px, 58vh, 860px)`.
+- **Verification** — Typecheck and the production build pass; `ssh.hosts`, `ssh.status` and `ssh.helper` were exercised through the packaged MCP server against a live fleet.
+- **Asset** — [`NexusPVE-1.0.27-portable.exe`](https://github.com/nobody71004/nexus-pve/releases/download/v1.0.27/NexusPVE-1.0.27-portable.exe) (117,597,280 bytes), SHA-256 `7285764d3ab1644c29775e396d84800e808033aeca50fb21510d690028b42b42`. It is unsigned.
 
 ### Release 1.0.26
 
@@ -225,7 +236,7 @@ npm run preflight
 npm run package
 ```
 
-Output: `release/NexusPVE-1.0.26-portable.exe`.
+Output: `release/NexusPVE-1.0.27-portable.exe`.
 
 For development:
 

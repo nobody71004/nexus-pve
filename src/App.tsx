@@ -968,7 +968,19 @@ function Workspace({
     return [...seen];
   }, [nodes]);
 
-  const health = snapshot?.status.health ?? (hosts.length > 0 ? "connecting" : "offline");
+  // With no Proxmox endpoint there is no snapshot, so the link badge follows the
+  // SSH fleet instead of claiming the whole workspace is offline.
+  const health =
+    snapshot?.status.health ??
+    (hosts.length > 0
+      ? "connecting"
+      : sshHosts.length === 0
+        ? "offline"
+        : sshOnline > 0
+          ? "online"
+          : Object.keys(sshStatuses).length >= sshHosts.length
+            ? "offline"
+            : "connecting");
 
   const commands = useMemo<Command[]>(() => {
     const list: Command[] = [
@@ -1225,7 +1237,7 @@ function Workspace({
               pveNodes={fleetNodes.map(({ host, node }) => ({ endpoint: host.label, node: node.node }))}
               canManage={currentUser.role !== "user"}
             />
-          ) : !activeHostId && tab !== "connections" ? (
+          ) : !activeHostId && sshHosts.length === 0 && tab !== "connections" ? (
             <Panel eyebrow="GET STARTED" title="Connect your first Proxmox endpoint">
               <div className="hero-empty">
                 <span className="hero-glyph">
