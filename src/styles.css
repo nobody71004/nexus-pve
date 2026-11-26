@@ -5013,11 +5013,25 @@ tr:hover .row-actions {
   overflow: auto;
 }
 
-/* Sized by the zoom factor: noVNC scales the framebuffer to fill this box. */
+/* Scrollable area at the zoomed size; the target inside stays panel-sized. */
+.vnc-sizer {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+}
+
+/* Always one panel in size and untransformed so noVNC always fits at 100%. */
 .vnc-target {
   position: relative;
   width: 100%;
   height: 100%;
+}
+
+/* Zoom is applied to the canvas only, anchored top-left, so the console grows in
+   place instead of being re-fitted and centred off to the right. */
+.vnc-target canvas {
+  transform: scale(var(--vnc-zoom, 1));
+  transform-origin: top left;
 }
 
 .vnc-zoom-readout {

@@ -258,8 +258,17 @@ protected_address() {
   case "$1" in
     127.* | 0.0.0.0 | ::1 | :: | ::ffff:127.* | 169.254.* | fe80:* | ff02::*) return 0 ;;
   esac
-  active=$(ss -Htn state established '( sport = :22 )' 2>/dev/null | awk '{print $4}' | sed 's/:22$//' | sed 's/^\[//; s/\]$//')
-  for peer in $active; do
+  # The caller issuing this ban sits on the far end of this very session; a ban
+  # that drops it also drops the connection carrying the command.
+  client_ip=${SSH_CONNECTION%% *}
+  if [ -n "$client_ip" ] && [ "$client_ip" = "$1" ]; then return 0; fi
+  # Never drop a peer holding a live SSH session. The peer is the last column,
+  # which is the one position that holds across iproute2 builds: some omit the
+  # State column under -H, so field numbers shift and an earlier version ended
+  # up matching the host against its own address and protecting nobody.
+  for peer in $(ss -Htn state established '( sport = :22 )' 2>/dev/null \
+      | awk '{print $NF}' \
+      | sed 's/^\[//; s/\]:[0-9]*$//; s/:[0-9]*$//'); do
     if [ "$peer" = "$1" ]; then return 0; fi
   done
   return 1
@@ -548,18 +557,36 @@ apply_fail2ban() {
       echo "fail2ban could not be installed (no network or apt lock)"; exit 6
     }
   fi
-  cat >/etc/fail2ban/jail.local <<'EOF'
-# managed by nexus-priv (security guard)
-[DEFAULT]
-backend = systemd
-bantime = 1h
-findtime = 10m
-maxretry = 5
-ignoreip = 127.0.0.1/8 ::1
-
-[sshd]
-enabled = true
-EOF
+  # Never ban the address this host is being managed from: a handful of failed
+  # probes from the operator's own machine would otherwise lock the app out of
+  # the box it is supposed to fix (and did exactly that). SSH_CONNECTION carries
+  # the caller when the guard runs over SSH; the resident timer has none.
+  ignore="127.0.0.1/8 ::1"
+  client_ip=$(printf '%s' "${SSH_CONNECTION:-}" | awk '{print $1}')
+  case "$client_ip" in
+    ''|*[!0-9a-fA-F:.]*) : ;;
+    *) ignore="$ignore $client_ip" ;;
+  esac
+  # A host on a private network is administered from that network; a single
+  # /24 keeps the operator's DHCP address from rotating out of the allowlist.
+  host_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+  case "$host_ip" in
+    10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*)
+      ignore="$ignore ${host_ip%.*}.0/24"
+      ;;
+  esac
+  {
+    printf '# managed by nexus-priv (security guard)\n'
+    printf '[DEFAULT]\n'
+    printf 'backend = systemd\n'
+    printf 'bantime = 1h\n'
+    printf 'findtime = 10m\n'
+    printf 'maxretry = 5\n'
+    printf 'ignoreip = %s\n' "$ignore"
+    printf '\n[sshd]\n'
+    printf 'enabled = true\n'
+  } >/etc/fail2ban/jail.local
+  printf 'ignoreip=%s\n' "$ignore"
   systemctl enable fail2ban >/dev/null 2>&1 || true
   systemctl restart fail2ban >/dev/null 2>&1 || {
     echo "fail2ban failed to start"; exit 7
@@ -644,6 +671,42 @@ apply_firewall_baseline() {
   printf 'firewall=nft tcp=%s udp=%s\n' "${tcp_ports:-none}" "${udp_ports:-none}"
 }
 
+# Applies pending package updates. Non-interactive and confold/confdef so a
+# running service is never replaced by a debconf prompt or a clobbered config;
+# apt itself decides what needs a restart. Never removes packages, so a kernel
+# or driver the operator pinned stays installed.
+apply_patch() {
+  command -v apt-get >/dev/null 2>&1 || die "apt-get is not available on this host"
+  log=/tmp/nexus-priv-patch.log
+  : >"$log" 2>/dev/null || die "cannot write $log"
+  before=$(apt-get -s upgrade 2>/dev/null | grep -c '^Inst ')
+  printf 'patching %s from %s pending update(s)\n' "$(hostname 2>/dev/null || echo host)" "$before"
+  DEBIAN_FRONTEND=noninteractive apt-get update -qq >>"$log" 2>&1 || {
+    printf 'apt-get update failed:\n'
+    tail -8 "$log"
+    rm -f "$log"
+    exit 9
+  }
+  DEBIAN_FRONTEND=noninteractive apt-get -y \
+    -o Dpkg::Options::=--force-confdef \
+    -o Dpkg::Options::=--force-confold upgrade >>"$log" 2>&1
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf 'apt-get upgrade failed (rc=%s):\n' "$rc"
+    tail -20 "$log"
+    rm -f "$log"
+    exit 9
+  fi
+  after=$(apt-get -s upgrade 2>/dev/null | grep -c '^Inst ')
+  printf 'patched %s: pending %s -> %s\n' "$(hostname 2>/dev/null || echo host)" "$before" "$after"
+  if [ -f /var/run/reboot-required ]; then
+    printf 'reboot required: %s\n' "$(tr '\n' ' ' </var/run/reboot-required.pkgs 2>/dev/null | cut -c1-180)"
+  else
+    printf 'no reboot required\n'
+  fi
+  rm -f "$log"
+}
+
 guard_apply() {
   [ $# -eq 1 ] || usage
   mkdir -p "$GUARD_ETC" || exit 4
@@ -671,6 +734,9 @@ guard_apply() {
       ;;
     firewall-baseline)
       apply_firewall_baseline
+      ;;
+    patch-apply)
+      apply_patch
       ;;
     *)
       die "unknown remediation id: $1"

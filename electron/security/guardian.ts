@@ -61,6 +61,9 @@ export const REMEDIATIONS: Record<string, Remediation> = {
   "unattended-upgrades": { label: "Enable unattended security updates" },
   "fail2ban-baseline": { label: "Deploy the fail2ban sshd jail" },
   "firewall-baseline": { label: "Baseline host firewall, keeping SSH reachable", guarded: true },
+  // A patch run restarts services and can install a kernel, so it is never part
+  // of the unattended loop: the operator clicks Fix, or calls security.enforce.
+  "patch-apply": { label: "Apply pending package updates" },
   "resident-install": {
     label: "Install the resident enforcer",
     // The install applies its baseline once, so it can legitimately touch sshd
@@ -322,6 +325,9 @@ export class GuardianService {
           if (!check.remediation || !REMEDIATIONS[check.remediation]) continue;
           // Handled above, and retrying it here would duplicate the attempt.
           if (check.remediation === "helper-refresh") continue;
+          // Patching is deliberate: it can restart a live service or stage a new
+          // kernel, so it must not fire from the five-minute scan timer.
+          if (check.remediation === "patch-apply") continue;
           if (REMEDIATIONS[check.remediation].guarded && policy.mode !== "lockdown") continue;
           wanted.set(check.remediation, check.id);
         }
@@ -597,7 +603,10 @@ export class GuardianService {
     // abort the whole scan.
     let result: { ok: boolean; output: string };
     try {
-      result = await this.runGuard(hostId, ["apply", id], 300_000);
+      // A full upgrade on a slow host (the 72-thread k80 took ~7 minutes) needs
+      // more headroom than the other remediations.
+      const timeoutMs = id === "patch-apply" ? 900_000 : 300_000;
+      result = await this.runGuard(hostId, ["apply", id], timeoutMs);
     } catch (error) {
       result = { ok: false, output: error instanceof Error ? error.message : String(error) };
     }

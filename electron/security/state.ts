@@ -26,7 +26,10 @@ export function defaultPolicy(): SecurityPolicy {
     resident: false,
     allowlist: [],
     maxBansPerRun: 3,
-    banThreshold: 20,
+    // Per-source failures needed to ban. Aligned with fail2ban's maxretry: a
+    // distributed wave never puts 20 attempts behind one address, so a high
+    // value here detects the attack and then has nothing it can act on.
+    banThreshold: 5,
     updatedAt: 0,
   };
 }

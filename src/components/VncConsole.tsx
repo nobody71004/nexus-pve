@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import RFB from "@novnc/novnc";
 import type { SshHostSummary, VncPreflight, VncSession, VncSetupResult } from "../../shared/types";
 import { bridge, isMockBridge } from "../lib/bridge";
@@ -280,15 +280,6 @@ export function VncConsole({
     };
   }, [host.id, port, attempt, preflightState, preflight, onToast, teardown]);
 
-  // The zoom factor sizes the element noVNC scales the framebuffer into, so the
-  // whole desktop (text included) grows instead of being shrunk to fit. Setting
-  // scaleViewport again makes noVNC re-measure the resized target immediately.
-  useEffect(() => {
-    const rfb = rfbRef.current;
-    if (!rfb) return;
-    rfb.scaleViewport = true;
-  }, [zoom]);
-
   if (isMockBridge) {
     return (
       <div className="vnc-empty">
@@ -389,14 +380,23 @@ export function VncConsole({
 
       <div className="vnc-screen">
         <div className="vnc-scroll">
-          <div
-            className="vnc-target"
-            ref={screenRef}
-            tabIndex={0}
-            aria-label={`VNC console for ${host.label}`}
-            style={{ width: `${zoom * 100}%`, height: `${zoom * 100}%` }}
-            onMouseDown={() => rfbRef.current?.focus()}
-          />
+          {/* The sizer supplies the scrollable area. The target must stay exactly one
+              panel in size and untransformed: noVNC measures it with
+              getBoundingClientRect() to decide the fit, so scaling it would feed the
+              scaled size back in and re-centre the framebuffer off to the right. The
+              canvas is scaled instead, from its top-left, which noVNC ignores because
+              it only rewrites the canvas width/height and reads mouse positions from
+              the canvas rect (which already includes a transform). */}
+          <div className="vnc-sizer" style={{ width: `${zoom * 100}%`, height: `${zoom * 100}%` }}>
+            <div
+              className="vnc-target"
+              ref={screenRef}
+              tabIndex={0}
+              aria-label={`VNC console for ${host.label}`}
+              style={{ "--vnc-zoom": zoom } as CSSProperties}
+              onMouseDown={() => rfbRef.current?.focus()}
+            />
+          </div>
         </div>
         {state !== "connected" ? (
           <div className={cx("vnc-status", state === "error" && !installing && !noListener && "error")}>

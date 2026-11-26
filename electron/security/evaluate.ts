@@ -239,12 +239,17 @@ export function evaluate({ facts, baseline, policy, policyTampered, helper }: Ev
   }
 
   const failed = Number(value("failed_logins") || 0);
+  // The aggregate count and the per-source counts answer different questions:
+  // reporting "567 failed logins" without saying how many addresses produced
+  // them is what made an unbannable attack look bannable.
+  const failedSources = lines("failed_ips").length;
+  const spread = failedSources > 0 ? ` from ${failedSources} source${failedSources === 1 ? "" : "s"}` : "";
   if (failed > 500) {
-    add("auth.bruteforce", "access", "high", "fail", "SSH brute force", `${failed} failed logins in 24h — active attack`, {
+    add("auth.bruteforce", "access", "high", "fail", "SSH brute force", `${failed} failed logins in 24h${spread} — active attack`, {
       evidence: clip(lines("failed_ips").slice(0, 5).join(" · ")),
     });
   } else if (failed > 50) {
-    add("auth.bruteforce", "access", "medium", "warn", "SSH brute force", `${failed} failed logins in 24h`, {
+    add("auth.bruteforce", "access", "medium", "warn", "SSH brute force", `${failed} failed logins in 24h${spread}`, {
       evidence: clip(lines("failed_ips").slice(0, 5).join(" · ")),
     });
   } else {
@@ -322,9 +327,13 @@ export function evaluate({ facts, baseline, policy, policyTampered, helper }: Ev
 
   const pending = Number(value("apt_pending") || 0);
   if (pending > 80) {
-    add("patch.pending", "patch", "high", "fail", "Pending updates", `${pending} package updates pending`);
+    add("patch.pending", "patch", "high", "fail", "Pending updates", `${pending} package updates pending`, {
+      remediation: "patch-apply",
+    });
   } else if (pending > 20) {
-    add("patch.pending", "patch", "medium", "warn", "Pending updates", `${pending} package updates pending`);
+    add("patch.pending", "patch", "medium", "warn", "Pending updates", `${pending} package updates pending`, {
+      remediation: "patch-apply",
+    });
   } else {
     add("patch.pending", "patch", "medium", "pass", "Pending updates", pending === 0 ? "up to date" : `${pending} pending`);
   }
@@ -549,6 +558,8 @@ export function evaluate({ facts, baseline, policy, policyTampered, helper }: Ev
     if (!match) continue;
     const count = Number(match[1]);
     const address = match[2];
+    // A distributed wave never reaches a high per-source count, so this must
+    // sit near fail2ban's own maxretry rather than near the aggregate alarm.
     if (count < policy.banThreshold) continue;
     if (allow.has(address)) continue;
     if (candidates.includes(address)) continue;
