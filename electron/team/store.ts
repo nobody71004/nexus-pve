@@ -642,6 +642,37 @@ export class TeamService {
     return { ...state, expiresAt };
   }
 
+  /**
+   * Open a headless super-admin session for local automation (MCP tools).
+   * The desktop UI never calls this; every use is audited as auth.agent.
+   */
+  openAgentSession(): TeamUser {
+    const owner = this.one(
+      "SELECT id FROM users WHERE role = 'superadmin' AND status = 'active' ORDER BY created_at ASC, rowid ASC LIMIT 1",
+    );
+    if (!owner) throw new Error("This workspace has no active super admin to act as.");
+    const userId = String(owner.id);
+    const now = Date.now();
+    let sessionId = this.currentSessionId;
+    const usable = sessionId
+      ? this.one("SELECT id FROM sessions WHERE id = ? AND user_id = ? AND expires_at > ?", [sessionId, userId, now])
+      : null;
+    if (!usable) {
+      sessionId = uid();
+      this.run(
+        "INSERT INTO sessions (id, user_id, token_hash, created_at, last_seen_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+        [sessionId, userId, sha256(crypto.randomBytes(32).toString("hex")), now, now, now + SESSION_MS],
+      );
+    }
+    this.currentUserId = userId;
+    this.currentSessionId = sessionId;
+    this.lastTouchAt = now;
+    const user = this.toTeamUser(userId);
+    if (!user) throw new Error("The super admin account could not be loaded.");
+    this.transaction(() => this.audit(user, "auth.agent", "session", sessionId ?? undefined, user.displayName, "Opened a headless agent session"));
+    return user;
+  }
+
   currentUser(): TeamUser {
     const state = this.status();
     if (!state.user) throw new Error("Sign in to Nexus to continue.");

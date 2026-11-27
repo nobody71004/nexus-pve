@@ -9,7 +9,7 @@ import type { ToolContext } from "./agent/registry";
  * It runs headless and shares the same config/vault as the desktop app, so an
  * agent can drive Proxmox (and build this app) with the window closed.
  */
-const VERSION = "1.0.8";
+const VERSION = "1.1.0";
 const PROTOCOL = "2024-11-05";
 const appRoot = path.resolve(__dirname, "..");
 
@@ -100,6 +100,18 @@ local profiles); it restores the old keypair and pins if the egress does not com
 A host whose TCP 9443 endpoint stays blocked is reported as a failed rollout.
 praetor.install, praetor.install_all and praetor.rotate require "confirm": true. Proxmox
 nodes need a matching SSH inventory entry; the tools never invent one.
+App and inventory tools: app.overview reports version, paths, runtime and counts; app.settings and
+app.settings.save read or patch uiScale, pollMs, accent, motion and GPU alert thresholds.
+fleet.inventory returns every configured Proxmox endpoint and SSH host without secrets. hosts.save
+creates or updates a Proxmox endpoint (secret encrypted, never returned); hosts.remove deletes one.
+ssh.hosts.save creates or updates an SSH inventory entry; ssh.hosts.remove deletes it. Both removals
+require "confirm": true.
+Team tools: team.directory reads accounts, roles, statuses, machines and grants straight from
+team.sqlite without a password and without writing, so it is safe while the desktop app is open.
+team.user.create, team.user.update, team.user.grant and team.user.delete act as the workspace
+super admin through an audited headless session (auth.agent); they refuse to run while the desktop
+app is open because the app flushes its in-memory database on exit. team.user.delete requires
+"confirm": true.
 Development tools (dev.tree/read_file/write_file/build/typecheck/smoke/package) operate
 only inside the app directory; writes are backed up under .nexus-backup/.`;
 

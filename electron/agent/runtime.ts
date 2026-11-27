@@ -12,6 +12,7 @@ import { registerDdosTools } from "./tools-ddos";
 import { registerPraetorTools } from "./tools-praetor";
 import { registerSshTools } from "./tools-ssh";
 import { registerMachineTools } from "./tools-machines";
+import { registerAppTools } from "./tools-app";
 import { bindGuardianEmit, guardian } from "../security/guardian";
 import { sshKeys } from "../sshkeys/service";
 import { setHelperAppRoot } from "../ssh/helper";
@@ -40,6 +41,7 @@ export function createRuntime(appRoot: string, emit: (event: NexusEvent) => void
   registerDdosTools(registry);
   registerPraetorTools(registry);
   registerDevTools(registry);
+  registerAppTools(registry);
   registerAuditTools(registry);
   const pipelines = new PipelineService({ store, registry, appRoot, emit });
 
