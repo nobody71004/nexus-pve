@@ -18,6 +18,13 @@ export interface AuditEntry {
   args: Record<string, unknown>;
   ok: boolean;
   error?: string;
+  /** Set by shell calls so the trail reads on its own without the args. */
+  host?: string;
+  role?: string;
+  code?: number | null;
+  route?: string;
+  elevated?: boolean;
+  durationMs?: number;
 }
 
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -32,7 +39,7 @@ export function summarizeArgs(args: Record<string, unknown>): Record<string, unk
       out.contentBytes = Buffer.byteLength(value);
       continue;
     }
-    if (key === "password" || key === "sudoPassword" || key === "secret" || key === "token") {
+    if (key === "password" || key === "sudoPassword" || key === "secret" || key === "token" || key === "stdin") {
       out[key] = "[redacted]";
       continue;
     }

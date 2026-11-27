@@ -1,7 +1,8 @@
 import type { ConfigStore } from "../config";
 import type { FleetSnapshot, NodeStats } from "../../shared/types";
 import { collectSnapshot } from "../pve/collect";
-import { execOnHost, findSshHostForPveNode } from "../ssh/collect";
+import { findSshHostForPveNode } from "../ssh/collect";
+import { runShell } from "../ssh/shell";
 import { vnc } from "../vnc/service";
 import {
   confirmDestructive,
@@ -248,14 +249,17 @@ export function registerMachineTools(registry: ToolRegistry): void {
     name: "machines.exec",
     title: "Run a command on a Linux host or Proxmox node",
     description:
-      "Execute a command over SSH on a Linux host or on a Proxmox node with a matching Linux host. Destructive and gated: requires confirm:true. Set shell:true only when the command genuinely needs pipes or redirection.",
+      "Execute a command over SSH on a Linux host or on a Proxmox node with a matching Linux host. Commands run through bash, so pipes, redirection and multiple statements work; pass elevate:true to ask the host for root. Destructive and gated: requires confirm:true. machines.shell exposes the same engine with cwd, env and stdin.",
     category: "destructive",
+    audit: false,
     inputSchema: {
       type: "object",
       properties: {
         target: { type: "string", description: "machines.list target, e.g. ssh:<host-id> or pve:<endpoint-id>/<node>." },
         command: { type: "string" },
-        shell: { type: "boolean" },
+        shell: { type: "boolean", description: "Accepted for compatibility; commands always run through bash now." },
+        elevate: { type: "boolean", description: "Ask the host for root (root, NOPASSWD or the stored password)." },
+        timeoutMs: { type: "number" },
         confirm: { type: "boolean" },
       },
       required: ["command"],
@@ -270,14 +274,39 @@ export function registerMachineTools(registry: ToolRegistry): void {
         tool: "machines.exec",
         args: { target: target.target, command },
       });
-      const result = await execOnHost(ctx.store, hostId, command, { allowShell: args.shell === true });
+      const timeoutMs = optionalNumber(args, "timeoutMs");
+      const result = await runShell(
+        ctx.store,
+        {
+          target: target.target,
+          kind: target.kind,
+          label: target.label,
+          hostId,
+          ...(target.endpointId ? { endpointId: target.endpointId } : {}),
+          ...(target.node ? { node: target.node } : {}),
+        },
+        {
+          command,
+          role: "system",
+          elevate: args.elevate === true ? "auto" : "none",
+          auditTool: "machines.exec",
+          ...(timeoutMs ? { timeoutMs } : {}),
+        },
+      );
       return {
         target: target.target,
         kind: target.kind,
         label: target.label,
         node: target.node ?? null,
         sshHost: target.sshHostLabel ?? null,
-        ...result,
+        host: result.host,
+        ok: result.ok,
+        code: result.code,
+        latencyMs: result.durationMs,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        route: result.route,
+        elevated: result.elevated,
       };
     },
   });

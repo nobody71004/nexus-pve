@@ -9,7 +9,7 @@ import type { ToolContext } from "./agent/registry";
  * It runs headless and shares the same config/vault as the desktop app, so an
  * agent can drive Proxmox (and build this app) with the window closed.
  */
-const VERSION = "1.2.0";
+const VERSION = "1.3.0";
 const PROTOCOL = "2024-11-05";
 const appRoot = path.resolve(__dirname, "..");
 
@@ -82,12 +82,19 @@ privileged step runs through /usr/local/sbin/nexus-priv, so a key-only host need
 installed and current (ssh.helper, ssh.helper.install). A package whose unit name differs
 from its package name needs "unit"; when no unit matches, the install says so rather than
 reporting a service that is not running.
-Machine control spans Linux hosts and Proxmox nodes: machines.list is a safe read. machines.exec
-runs a command over SSH on either target (a Proxmox node must have a matching Linux host).
+Machine control spans Linux hosts and Proxmox nodes: machines.list is a safe read. machines.shell is the
+full SSH surface: any bash command, pipes/redirection/here-docs, cwd, env and stdin, on "ssh:<host-id>"
+or "pve:<endpoint>/<node>" (a Proxmox node needs a matching Linux host; the API cannot run commands).
+Set elevate:"auto" to run as root through root, a NOPASSWD grant or the stored password (sudo -S on
+stdin); elevate:"none" (default) runs as the login account. The role argument applies the permission
+matrix: system/superadmin/admin are unrestricted with elevation, moderator is unrestricted without
+elevation, user is read-only diagnostics. machines.shell.policy prints the matrix, the member
+allowlist and the audit fields. Every call is recorded in audit.jsonl with host, role, command,
+route, exit code and duration, including refusals. machines.exec uses the same engine.
 machines.vnc.preflight is a safe read; machines.vnc.setup installs the loopback terminal
 console; machines.vnc.open returns a loopback-only ws://127.0.0.1 URL with a one-time token
 that grants interactive console control, so treat it as a credential. open, setup and exec
-require "confirm": true. machines.vnc.sessions and machines.vnc.close manage only the local
+require "confirm": true. machines.shell and machines.exec require "confirm": true too. machines.vnc.sessions and machines.vnc.close manage only the local
 bridge. Fleet pipelines: console-sweep (read-only VNC readiness across every machine) and
 fleet-command (gated command on every mapped Linux host and Proxmox node). Start either with
 pipeline.run { pipeline, host: "fleet", vars: { command, shell } }.

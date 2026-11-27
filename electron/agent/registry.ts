@@ -27,6 +27,8 @@ export interface ToolDef {
   description: string;
   category: ToolCategory;
   inputSchema: JsonSchema;
+  /** Set false when the tool writes its own richer audit entry. */
+  audit?: boolean;
   run(args: Record<string, unknown>, ctx: ToolContext): Promise<unknown>;
 }
 
@@ -41,9 +43,10 @@ export class ToolRegistry {
       ...def,
       run: async (args, ctx) => {
         const auditable =
-          def.category === "mutate" ||
+          def.audit !== false &&
+          (def.category === "mutate" ||
           def.category === "destructive" ||
-          (def.category === "dev" && def.name !== "dev.tree" && def.name !== "dev.read_file");
+          (def.category === "dev" && def.name !== "dev.tree" && def.name !== "dev.read_file"));
         try {
           const result = await def.run(args, ctx);
           if (auditable) {

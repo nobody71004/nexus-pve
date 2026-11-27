@@ -32,13 +32,13 @@ import { createSnapshot, deleteSnapshot, rollbackSnapshot } from "./pve/api";
 import { mcpServerPath, type Runtime } from "./agent/runtime";
 import {
   collectSshSnapshot,
-  execOnHost,
   listSshHosts,
   probeSshHealth,
   removeSshHost,
   saveSshHost,
   testSshHost,
 } from "./ssh/collect";
+import { resolveShellTarget, runShell } from "./ssh/shell";
 import { actOnSshHost, runSpeedTest, runSpeedTestAll } from "./ssh/actions";
 import { checkHelper, installHelper } from "./ssh/helper";
 import { importAccessBundle } from "./ssh/access";
@@ -482,15 +482,33 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
     );
     return probeSshHealth(store, new Set(visible.map((host) => host.id)));
   });
-  ipcMain.handle(IPC.sshExec, (_event, hostId, command, options) => {
+  ipcMain.handle(IPC.sshExec, async (_event, hostId, command, options) => {
     const id = str(hostId, "host id");
-    guardSshHost(id);
-    return execOnHost(store, id, str(command, "command"), {
-      allowShell: Boolean(options && typeof options === "object" && (options as { shell?: boolean }).shell),
-      timeoutMs: typeof options === "object" && options && Number((options as { timeoutMs?: number }).timeoutMs) > 0
-        ? Number((options as { timeoutMs?: number }).timeoutMs)
-        : undefined,
+    // The signed-in role is the policy: members are held to read-only
+    // diagnostics here, not just in the agent surface.
+    const user = guardSshHost(id);
+    const opts = (options && typeof options === "object" ? options : {}) as {
+      shell?: boolean;
+      timeoutMs?: number;
+      elevate?: boolean;
+      cwd?: string;
+    };
+    const timeout = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : undefined;
+    const result = await runShell(store, resolveShellTarget(store, `ssh:${id}`), {
+      command: str(command, "command"),
+      role: user.role,
+      elevate: opts.elevate === true ? "auto" : "none",
+      ...(typeof opts.cwd === "string" && opts.cwd.trim() ? { cwd: opts.cwd.trim() } : {}),
+      ...(timeout ? { timeoutMs: timeout } : {}),
     });
+    return {
+      host: result.host,
+      ok: result.ok,
+      code: result.code,
+      latencyMs: result.durationMs,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    };
   });
   ipcMain.handle(IPC.sshSpeedtest, (_event, hostId: unknown) => {
     const id = str(hostId, "host id");
