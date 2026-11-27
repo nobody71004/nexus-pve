@@ -7,7 +7,7 @@ import { Client } from "ssh2";
 import type { ClientChannel } from "ssh2";
 import type { ConfigStore } from "../config";
 import { configStore } from "../config";
-import { runRemote, sshArgs } from "../ssh/probe";
+import { keyFileIssue, runRemote, sshArgs } from "../ssh/probe";
 import { keyMaterial } from "../ssh/transport";
 import type { VncPreflight, VncSession, VncSetupResult } from "../../shared/fabric-types";
 import { ensureTerminalVnc } from "./setup";
@@ -327,6 +327,12 @@ export class VncService {
       });
 
       if (!session.ssh) {
+        const keyIssue = keyFileIssue(host.keyPath);
+        if (keyIssue) {
+          ws.close(1011, keyIssue.slice(0, 120));
+          end();
+          return;
+        }
         const args = sshArgs({
           host: host.host,
           port: host.port,

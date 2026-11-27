@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { GPU_PROBE_BODY, parseGpuProbe } from "./gpu";
@@ -149,6 +150,54 @@ function expandHome(value: string): string {
   return value;
 }
 
+/**
+ * A configured key path that cannot be opened is a local fault, yet ssh reports
+ * it as `Permission denied (publickey)` — with IdentitiesOnly=yes it has no
+ * other identity to offer, so the error reads like the server rejected a good
+ * key. Check the file first and name the real fault, with the expanded path.
+ */
+export function keyFileIssue(keyPath?: string): string | undefined {
+  const configured = keyPath?.trim();
+  // Blank is deliberate: ssh falls back to the agent and the default keys.
+  if (!configured) return undefined;
+  const resolved = expandHome(configured);
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(resolved);
+  } catch {
+    const shown = resolved === configured ? resolved : `${resolved} (configured as ${configured})`;
+    return `SSH key file not found on this PC: ${shown}. Set the right path in Edit, or copy the key there.`;
+  }
+  if (!stat.isFile()) return `SSH key path is not a file: ${resolved}. Point it at the private key itself.`;
+  try {
+    fs.accessSync(resolved, fs.constants.R_OK);
+  } catch {
+    return `SSH key file is not readable by this user: ${resolved}. Fix the file permissions.`;
+  }
+  return undefined;
+}
+
+/** RFC 1918, link-local, CGNAT and loopback targets: no route from another network. */
+function isPrivateAddress(host?: string): boolean {
+  const name = host?.trim().replace(/^\[|\]$/g, "").toLowerCase();
+  if (!name) return false;
+  if (name === "localhost" || name.endsWith(".local") || name.endsWith(".lan") || name.endsWith(".internal")) return true;
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(name);
+  if (v4) {
+    const a = Number(v4[1]);
+    const b = Number(v4[2]);
+    return (
+      a === 10 ||
+      a === 127 ||
+      (a === 192 && b === 168) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 169 && b === 254) ||
+      (a === 100 && b >= 64 && b <= 127)
+    );
+  }
+  return /^f[cd][0-9a-f]{2}:/.test(name) || /^fe80:/.test(name) || name === "::1";
+}
+
 export function sshTarget(input: { host: string; username: string; port: number }): string {
   return `${input.username}@${input.host}`;
 }
@@ -194,6 +243,10 @@ export interface RunResult {
 export function runRemote(runner: ProbeRunner, script = REMOTE_PROBE, shell = "bash"): Promise<RunResult> {
   if (runner.password) {
     return execSsh2(runner, `${shell} -s`, { timeoutMs: runner.timeoutMs, feed: script });
+  }
+  const keyIssue = keyFileIssue(runner.keyPath);
+  if (keyIssue) {
+    return Promise.resolve({ ok: false, code: null, stdout: "", stderr: keyIssue, latencyMs: 0 });
   }
   return new Promise((resolve) => {
     const started = Date.now();
@@ -561,7 +614,7 @@ export function parseProbe(
       id: host.id,
       health: meta.ok ? "online" : "offline",
       latencyMs: meta.latencyMs,
-      error: meta.ok ? undefined : explainSshFailure(meta.stderr ?? "probe failed"),
+      error: meta.ok ? undefined : explainSshFailure(meta.stderr ?? "probe failed", host.host),
       checkedAt: Date.now(),
     },
     identity: {
@@ -618,16 +671,29 @@ export function parseProbe(
  * like a rejected credential). Translate the common network/auth failures into
  * something an operator can act on, and always keep the original line.
  */
-function explainSshFailure(raw: string): string {
+function explainSshFailure(raw: string, host?: string): string {
   const line = raw.trim().split(/\r?\n/).filter(Boolean).slice(-1)[0] ?? "ssh probe failed";
+  // keyFileIssue already names the file and the fix; do not bury it under advice.
+  if (/^SSH key (file|path)/.test(line)) return line;
+  const where = host?.trim() || "that address";
   if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(line)) {
     return `${line} — this hostname does not resolve from this PC. Use the server's IPv4 address instead.`;
   }
   if (/ECONNREFUSED/i.test(line)) return `${line} — nothing is listening on that port (sshd down, wrong port, or firewall).`;
-  if (/EHOSTUNREACH|ENETUNREACH/i.test(line)) return `${line} — no route to that address from this network.`;
-  if (/ETIMEDOUT|timed out/i.test(line)) return `${line} — packets are being dropped; check the provider firewall and that the IP is allocated to this box.`;
+  if (/EHOSTUNREACH|ENETUNREACH/i.test(line)) {
+    return isPrivateAddress(host)
+      ? `${line} — no route to ${where}: it is a private address, so only its own LAN or VPN can reach it.`
+      : `${line} — no route to that address from this network.`;
+  }
+  if (/ETIMEDOUT|timed out/i.test(line)) {
+    // A private target can never answer from another network, so the public-IP
+    // advice (provider firewall, IP allocation) sends people to the wrong place.
+    return isPrivateAddress(host)
+      ? `${line} — ${where} is a private address, reachable only from its own LAN or VPN. Use a public endpoint (a tunnel or relay for this host) or connect from that network.`
+      : `${line} — packets are being dropped; check the provider firewall and that the IP is allocated to this box.`;
+  }
   if (/All configured authentication methods failed|Permission denied/i.test(line)) {
-    return `${line} — the server rejected the login. Check the username/password, or whether password auth is enabled for that account.`;
+    return `${line} — the server rejected the login. Check the username/password, and for key auth that this key's public half is in the server's authorized_keys.`;
   }
   return line;
 }
@@ -640,7 +706,7 @@ export function summarizeTest(result: RunResult, snapshot: SshSnapshot): SshTest
     os: snapshot.identity.os,
     kernel: snapshot.identity.kernel,
     cores: snapshot.cpu.cores,
-    error: result.ok ? undefined : explainSshFailure(result.stderr || "ssh probe failed"),
+    error: result.ok ? undefined : explainSshFailure(result.stderr || "ssh probe failed", snapshot.host.host),
   };
 }
 
