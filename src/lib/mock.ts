@@ -2058,6 +2058,7 @@ export function createMockBridge(): NexusBridge {
       remove: async (id: string) => {
         sshHosts = sshHosts.filter((host) => host.id !== id);
       },
+      importAccess: async () => ({ ok: true, added: [], updated: [] }),
       test: async (input: SshHostInput): Promise<SshTestResult> => {
         await new Promise((resolve) => setTimeout(resolve, 480));
         if (!input.host || !input.username) return { ok: false, latencyMs: 0, error: "Host and username are required" };

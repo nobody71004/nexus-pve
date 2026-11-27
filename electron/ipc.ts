@@ -41,6 +41,7 @@ import {
 } from "./ssh/collect";
 import { actOnSshHost, runSpeedTest, runSpeedTestAll } from "./ssh/actions";
 import { checkHelper, installHelper } from "./ssh/helper";
+import { importAccessBundle } from "./ssh/access";
 import { setupGpuSensors } from "./ssh/gpu-setup";
 import { guardian } from "./security/guardian";
 import { sshKeys } from "./sshkeys/service";
@@ -423,6 +424,31 @@ export function registerIpc(runtime: Runtime, team: TeamService, teamSync: TeamS
     const saved = saveSshHost(store, input, user.id);
     team.syncMachines(listSshHosts(store));
     return saved;
+  });
+  // One-step handoff: a bundle carries addresses, ports and private keys, so the
+  // recipient imports it instead of retyping fields on every card.
+  ipcMain.handle(IPC.sshImportAccess, async (_event, file: unknown) => {
+    const user = team.currentUser();
+    let target = typeof file === "string" ? file.trim() : "";
+    if (!target) {
+      const picked = await dialog.showOpenDialog({
+        title: "Import SSH access bundle",
+        buttonLabel: "Import",
+        properties: ["openFile"],
+        filters: [{ name: "Nexus access bundle", extensions: ["json"] }],
+      });
+      if (picked.canceled || picked.filePaths.length === 0) {
+        return { ok: false, canceled: true, added: [], updated: [] };
+      }
+      target = picked.filePaths[0];
+    }
+    try {
+      const result = importAccessBundle(store, target, user.id);
+      team.syncMachines(listSshHosts(store));
+      return result;
+    } catch (error) {
+      return { ok: false, added: [], updated: [], error: error instanceof Error ? error.message : String(error) };
+    }
   });
   ipcMain.handle(IPC.sshHostsRemove, async (_event, id: unknown) => {
     const user = requireOperator();

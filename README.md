@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="License: GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-2ea44f?style=flat-square" /></a>
   <img alt="Platform: Windows 10/11 x64" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0a84ff?style=flat-square" />
   <img alt="Edge runtime: Python 3.10+ and nftables" src="https://img.shields.io/badge/edge-Python%203.10%2B%20%2B%20nftables-7c5cff?style=flat-square" />
-  <img alt="Version 1.0.34" src="https://img.shields.io/badge/version-1.0.34-3ddc97?style=flat-square" />
+  <img alt="Version 1.0.35" src="https://img.shields.io/badge/version-1.0.35-3ddc97?style=flat-square" />
 </p>
 
 > **Documentation image:** the hero uses documentation addresses from the RFC 5737 ranges. It does not show a live edge address. The project ships with fictional demo data and no credentials, private keys, or real infrastructure addresses.
@@ -715,6 +715,7 @@ Each host card reports CPU, memory, root free space, load, uptime, and network r
 ### Authentication
 
 - **Key auth** uses a configured private key path, the SSH agent, or default keys. A configured path that does not exist is reported by name before dialling, rather than failing as a rejected credential.
+- **One-click access import** — **Import access** in Linux hosts reads a handed-over JSON bundle (address, port, username and private key per host), writes each key under the app's key directory with mode `0600`, and updates a card with the same name in place. The recipient types nothing; re-importing the same bundle is a no-op.
 - **Password auth** stores the password in the local AES-256-GCM vault.
 - Host summaries never include the encrypted secret or plaintext password.
 
@@ -1081,6 +1082,7 @@ Back up the application data directory before changing hosts or rotating keys. L
 | **Mode change did not produce expected rates** | Inspect `nexus-shieldctl rules`. The half-rate tight window is driven by the auto-ban path; verify the effective rules rather than assuming a mode label is sufficient. |
 | **Legitimate traffic is being dropped** | Move to Observe, inspect the drop counters and top talkers, and allowlist trusted sources before tightening again. |
 | **App cannot reach the edge** | Confirm the SSH host is root-capable, the key/password is valid, the host is reachable, and the daemon's loopback port is not blocked by local policy. |
+| **Someone was given access to a machine** | Send them an access bundle and have them use Linux hosts → **Import access**. It creates or fixes every card, including the key, in one step. |
 | **`Permission denied (publickey)` on a host whose key works elsewhere** | The card names the key path it used. If that file is absent on this PC the app now says so instead of blaming the server; otherwise the key's public half is missing from the account's `authorized_keys`. |
 | **`Connection timed out` to `10.x`, `192.168.x`, `172.16-31.x`, or a `fe80:` address** | That is a private address and only its own LAN or VPN can reach it. Point the host at a public endpoint (a relay or reverse tunnel) or connect from that network; a provider firewall cannot be the cause. |
 | **Secrets look invalid after moving machines** | Copy the entire data directory including `keys/master.key`; do not copy `config.json` alone. |
@@ -1113,7 +1115,7 @@ If you discover a security issue, avoid posting live credentials, hostnames, or 
 - The UI is an operator console, not a multi-tenant control plane. Team roles and per-machine grants are enforced locally, but they are not an SSO provider or an enterprise identity boundary.
 - The embedded noVNC console requires a VNC daemon listening on the host's loopback interface. Nexus can install and start that terminal service automatically on SSH hosts (sway/wayvnc/foot, or TigerVNC/xterm), but never exposes it beyond loopback. Proxmox nodes must be present as SSH hosts for the installer; an API token alone cannot install packages.
 - A host whose SSH account is neither root nor able to use sudo needs a manual root-shell install first; the app can prompt for a sudo password but cannot create sudo rights.
-- The project is version `1.0.34`; review changes and test against a lab before relying on it for production recovery or attack response.
+- The project is version `1.0.35`; review changes and test against a lab before relying on it for production recovery or attack response.
 
 ---
 

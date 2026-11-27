@@ -534,6 +534,44 @@ export interface SshHostSummary {
   vncPort?: number;
 }
 
+/* ------------------------------------------------------- ssh access bundle */
+
+/** One host in a shareable access bundle, optionally with its key material. */
+export interface SshAccessBundleHost {
+  label: string;
+  host: string;
+  port?: number;
+  username: string;
+  /** OpenSSH/PEM private key. Stored by the app; never logged or returned. */
+  privateKey?: string;
+  /** Environment-specific path used when no key material is bundled. */
+  keyPath?: string;
+  color?: string;
+  /**
+   * Addresses this entry supersedes, so an existing card that still points at
+   * an old endpoint (a LAN address, a previous relay) is updated in place
+   * rather than left behind as a duplicate.
+   */
+  replaces?: string[];
+}
+
+/** A handoff file: importing it is the only step the recipient takes. */
+export interface SshAccessBundle {
+  version: 1;
+  label?: string;
+  hosts: SshAccessBundleHost[];
+}
+
+export interface SshAccessImportResult {
+  ok: boolean;
+  canceled?: boolean;
+  /** Labels created. */
+  added: string[];
+  /** Labels whose existing card was updated in place. */
+  updated: string[];
+  error?: string;
+}
+
 /* --------------------------------------------------------------- ssh keys */
 
 export type SshKeyStatus = "active" | "retired";
@@ -1149,6 +1187,8 @@ export interface NexusBridge {
     installHelper(hostId: string, sudoPassword?: string): Promise<HelperInstallResult>;
     /** Detect the host OS/GPU, install sensor packages and verify telemetry. */
     setupGpu(hostId: string): Promise<GpuSetupResult>;
+    /** Import a handed-over bundle: hosts, addresses and private keys in one step. */
+    importAccess(): Promise<SshAccessImportResult>;
   };
   sshkeys: {
     overview(): Promise<SshKeyOverview>;

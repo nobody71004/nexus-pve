@@ -45,6 +45,7 @@ export const IPC = {
   sshHostsSave: "nexus:ssh-hosts-save",
   sshHostsRemove: "nexus:ssh-hosts-remove",
   sshHostsTest: "nexus:ssh-hosts-test",
+  sshImportAccess: "nexus:ssh-import-access",
   sshSnapshot: "nexus:ssh-snapshot",
   sshHealth: "nexus:ssh-health",
   sshExec: "nexus:ssh-exec",

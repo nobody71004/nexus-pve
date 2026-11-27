@@ -144,6 +144,7 @@ export function LinuxHosts({
   canManage?: boolean;
 }) {
   const [hosts, setHosts] = useState<SshHostSummary[]>([]);
+  const [importing, setImporting] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<SshSnapshot | null>(null);
   const [statuses, setStatuses] = useState<Record<string, SshRuntimeStatus>>({});
@@ -361,6 +362,31 @@ export function LinuxHosts({
     setResult(null);
     setFormError(null);
     setEditing({ ...EMPTY });
+  };
+
+  // A bundle carries the address, port, user and key for each machine, so this
+  // is the whole onboarding step: pick the file, cards appear, nothing typed.
+  const importAccess = async () => {
+    setImporting(true);
+    try {
+      const result = await bridge.ssh.importAccess();
+      if (result.canceled) return;
+      if (!result.ok) {
+        onToast("error", "Access import failed", result.error ?? "no hosts were added");
+        return;
+      }
+      await loadHosts();
+      void loadWorkspace();
+      const parts = [
+        result.added.length ? `${result.added.length} added` : "",
+        result.updated.length ? `${result.updated.length} updated` : "",
+      ].filter(Boolean);
+      onToast("ok", "Access imported", parts.join(" · ") || "nothing changed");
+    } catch (err) {
+      onToast("error", "Access import failed", err instanceof Error ? err.message : String(err));
+    } finally {
+      setImporting(false);
+    }
   };
 
   const startEdit = (host: SshHostSummary) => {
@@ -658,6 +684,16 @@ export function LinuxHosts({
               <button className="btn small ghost" onClick={() => void runSpeed()} disabled={speeding || hosts.length === 0}>
                 <Icon name="activity" size={13} className={speeding ? "spin" : ""} /> {speeding ? "Measuring…" : "Speed test all"}
               </button>
+              {canManage ? (
+                <button
+                  className="btn small ghost"
+                  onClick={() => void importAccess()}
+                  disabled={importing}
+                  title="Add every host, address and private key from an access bundle in one step."
+                >
+                  {importing ? "Importing…" : "Import access"}
+                </button>
+              ) : null}
               {canManage ? (
                 <button className="btn small primary" onClick={startNew}>
                   <Icon name="plus" size={13} /> Add host
