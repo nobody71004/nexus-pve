@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { bridge, isMockBridge } from "../lib/bridge";
-import { clock } from "../lib/format";
 import { Icon } from "./Icon";
+import { NixieClock } from "./NixieClock";
 
 export function TitleBar({
   health,
@@ -52,7 +52,7 @@ export function TitleBar({
           <i className={`status-dot ${health}`} />
           {health === "online" ? "SECURE LINK" : health.toUpperCase()}
         </span>
-        <span className="titlebar-clock">{clock(now)}</span>
+        <NixieClock now={now} motion={motion} />
         <button className="btn icon ghost" onClick={onSettings} title="Interface settings" aria-label="Interface settings">
           <Icon name="settings" size={14} />
         </button>

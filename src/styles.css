@@ -312,12 +312,185 @@ kbd {
   letter-spacing: 0.16em;
   color: var(--green);
 }
-.titlebar-clock {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--muted);
+/* Nixie tube clock -------------------------------------------------------- */
+.nixie-clock {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 44px;
+  padding: 4px 9px 5px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 176, 92, 0.18);
+  background:
+    radial-gradient(120% 150% at 50% 130%, rgba(255, 138, 54, 0.14), transparent 62%),
+    linear-gradient(180deg, rgba(32, 22, 14, 0.78), rgba(9, 7, 5, 0.9));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 219, 178, 0.12),
+    inset 0 -12px 20px -14px rgba(255, 128, 44, 0.5),
+    0 8px 22px -16px rgba(255, 140, 60, 0.5);
+  -webkit-app-region: no-drag;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.06em;
+}
+.nixie-tube {
+  position: relative;
+  width: 19px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: 8px 8px 3px 3px / 10px 10px 3px 3px;
+  overflow: hidden;
+  background:
+    radial-gradient(92% 58% at 50% 16%, rgba(255, 196, 130, 0.12), transparent 68%),
+    linear-gradient(180deg, rgba(38, 26, 16, 0.96), rgba(11, 8, 6, 0.99));
+  border: 1px solid rgba(255, 178, 96, 0.24);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 228, 194, 0.18),
+    inset 0 -7px 12px -8px rgba(255, 126, 40, 0.7),
+    0 0 13px -5px rgba(255, 140, 60, 0.6);
+}
+.nixie-cathodes {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1000%;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.52s cubic-bezier(0.2, 0.9, 0.22, 1);
+  will-change: transform;
+}
+.nixie-digit {
+  flex: 1 1 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1;
+  /* Near-hollow numerals with a lit outline read like wire cathodes. */
+  color: rgba(255, 190, 122, 0.45);
+  -webkit-text-stroke: 0.6px rgba(255, 214, 172, 0.95);
+  transform: scaleY(1.1);
+  text-shadow:
+    0 0 3px rgba(255, 206, 158, 0.6),
+    0 0 9px rgba(255, 146, 62, 0.6),
+    0 0 20px rgba(255, 92, 20, 0.38);
+}
+.nixie-tube::after {
+  content: "";
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  bottom: 0;
+  height: 4px;
+  border-radius: 0 0 2px 2px;
+  background: linear-gradient(180deg, rgba(255, 178, 100, 0.22), rgba(42, 27, 15, 0.96));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 220, 180, 0.24),
+    0 -1px 3px rgba(255, 140, 60, 0.18);
+}
+.nixie-tube.is-dark .nixie-cathodes {
+  opacity: 0;
+}
+.nixie-mesh {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 196, 140, 0.11) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgba(255, 196, 140, 0.08) 0 1px, transparent 1px 3px);
+  mix-blend-mode: screen;
+  opacity: 0.5;
+}
+.nixie-glass {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(112deg, rgba(255, 255, 255, 0.16) 0 17%, rgba(255, 255, 255, 0.03) 30%, transparent 47%),
+    radial-gradient(120% 42% at 50% 0%, rgba(255, 255, 255, 0.12), transparent 62%);
+  box-shadow: inset 0 0 6px rgba(0, 0, 0, 0.72);
+}
+.nixie-cap {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 10px;
+  height: 3px;
+  transform: translateX(-50%);
+  border-radius: 0 0 3px 3px;
+  background: linear-gradient(180deg, #6d5e4c, #241c14);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+}
+.nixie-colon {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 1px;
+}
+.nixie-colon i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #ffb066;
+  box-shadow:
+    0 0 5px rgba(255, 152, 70, 0.95),
+    0 0 12px rgba(255, 96, 24, 0.5);
+}
+.nixie-meridiem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 2px;
+}
+.nixie-meridiem b {
+  font-family: var(--mono);
+  font-size: 7.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: rgba(122, 96, 72, 0.6);
+  transition: color 0.3s, text-shadow 0.3s;
+}
+.nixie-meridiem b.on {
+  color: #ffcf9c;
+  text-shadow:
+    0 0 5px rgba(255, 164, 82, 0.95),
+    0 0 13px rgba(255, 96, 24, 0.45);
+}
+.nixie-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.nixie-live .nixie-colon i:last-child {
+  animation: nixie-pulse 2s steps(1, end) infinite;
+}
+.nixie-live .nixie-tube {
+  animation: nixie-breathe 6.5s ease-in-out infinite;
+}
+@keyframes nixie-pulse {
+  50% {
+    opacity: 0.24;
+  }
+}
+@keyframes nixie-breathe {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  47% {
+    filter: brightness(1.07);
+  }
+  51% {
+    filter: brightness(0.96);
+  }
 }
 
 .window-controls {
@@ -5365,11 +5538,6 @@ tr:hover .row-actions {
 .link-state {
   text-shadow: 0 0 18px rgba(75, 255, 176, 0.28);
 }
-.titlebar-clock {
-  color: #a1b5c7;
-  text-shadow: 0 0 19px rgba(160, 220, 255, 0.14);
-}
-
 .rail {
   background:
     radial-gradient(150% 55% at 50% -4%, rgba(34, 102, 152, 0.15), transparent 70%),

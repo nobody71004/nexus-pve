@@ -44,6 +44,9 @@ type Row = Record<string, SqlValue>;
 type Param = string | number | null;
 
 const SESSION_MS = 12 * 60 * 60 * 1000;
+/** A remembered workstation login survives restarts for a month of inactivity. */
+const REMEMBER_SESSION_MS = 30 * 24 * 60 * 60 * 1000;
+const REMEMBERED_SESSION_KEY = "remembered_session";
 const ONLINE_MS = 5 * 60 * 1000;
 const TOUCH_MS = 60_000;
 const LOGIN_WINDOW_MS = 10 * 60 * 1000;
@@ -211,6 +214,7 @@ export class TeamService {
     const service = new TeamService(db, file);
     service.migrate();
     service.persist();
+    service.restoreRememberedSession();
     return service;
   }
 
@@ -604,7 +608,7 @@ export class TeamService {
       this.run("DELETE FROM login_throttle");
       // Keep schema_version so the next launch does not run a data migration
       // against the freshly imported relay directory.
-      this.run("DELETE FROM settings WHERE key IN ('workspace_name', 'workspace_updated_at')");
+      this.run("DELETE FROM settings WHERE key IN ('workspace_name', 'workspace_updated_at', 'remembered_session')");
     });
   }
 
@@ -627,8 +631,9 @@ export class TeamService {
   refreshSession(): TeamAuthState {
     const state = this.status();
     if (!state.user || !this.currentSessionId) return state;
-    const expiresAt = Date.now() + SESSION_MS;
-    this.run("UPDATE sessions SET expires_at = ?, last_seen_at = ? WHERE id = ?", [
+    // Never shorten a remembered session back to the 12-hour default.
+    const expiresAt = Math.max(state.expiresAt ?? 0, Date.now() + SESSION_MS);
+    this.run("UPDATE sessions SET expires_at = MAX(expires_at, ?), last_seen_at = ? WHERE id = ?", [
       expiresAt,
       Date.now(),
       this.currentSessionId,
@@ -712,7 +717,7 @@ export class TeamService {
       this.run("DELETE FROM sessions WHERE expires_at <= ?", [now]);
       this.run(
         "INSERT INTO sessions (id, user_id, token_hash, created_at, last_seen_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
-        [sessionId, userId, tokenHash, now, now, now + SESSION_MS],
+        [sessionId, userId, tokenHash, now, now, now + REMEMBER_SESSION_MS],
       );
       this.run("UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?", [now, now, userId]);
     });
@@ -720,6 +725,7 @@ export class TeamService {
     this.currentUserId = userId;
     this.currentSessionId = sessionId;
     this.lastTouchAt = now;
+    this.rememberSession(userId, sessionId);
     this.clearLoginFailures(throttleKey);
     const user = this.toTeamUser(userId);
     if (!user) throw new Error("Account disappeared during sign-in.");
@@ -736,6 +742,7 @@ export class TeamService {
         if (sessionId) this.run("DELETE FROM sessions WHERE id = ?", [sessionId]);
       });
     }
+    this.forgetRememberedSession();
     this.clearSession();
   }
 
@@ -2128,6 +2135,48 @@ export class TeamService {
     const actual = crypto.scryptSync(password, salt, 64);
     const stored = Buffer.from(expected, "hex");
     return actual.length === stored.length && crypto.timingSafeEqual(actual, stored);
+  }
+
+  /** Remember the workstation login so quitting the app does not sign out. */
+  private rememberSession(userId: string, sessionId: string): void {
+    this.run("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", [
+      REMEMBERED_SESSION_KEY,
+      `${userId}:${sessionId}`,
+    ]);
+    this.persist();
+  }
+
+  private forgetRememberedSession(): void {
+    if (!this.one("SELECT value FROM settings WHERE key = ?", [REMEMBERED_SESSION_KEY])) return;
+    this.run("DELETE FROM settings WHERE key = ?", [REMEMBERED_SESSION_KEY]);
+    this.persist();
+  }
+
+  /**
+   * Re-attach the session this computer signed in with last time. The session
+   * row already lives in the database; only the in-memory pointer was lost on
+   * quit, which is what forced a password prompt on every launch.
+   */
+  private restoreRememberedSession(): void {
+    const row = this.one("SELECT value FROM settings WHERE key = ?", [REMEMBERED_SESSION_KEY]);
+    const [userId, sessionId] = String(row?.value ?? "").split(":");
+    if (!userId || !sessionId) return;
+    const session = this.one("SELECT expires_at FROM sessions WHERE id = ? AND user_id = ?", [sessionId, userId]);
+    const user = this.toTeamUser(userId);
+    if (!session || !user || user.status !== "active" || Number(session.expires_at) <= Date.now()) {
+      this.forgetRememberedSession();
+      return;
+    }
+    const now = Date.now();
+    this.run("UPDATE sessions SET expires_at = MAX(expires_at, ?), last_seen_at = ? WHERE id = ?", [
+      now + REMEMBER_SESSION_MS,
+      now,
+      sessionId,
+    ]);
+    this.persist();
+    this.currentUserId = userId;
+    this.currentSessionId = sessionId;
+    this.lastTouchAt = now;
   }
 
   private clearSession(): void {
