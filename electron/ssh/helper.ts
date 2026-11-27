@@ -511,10 +511,11 @@ export async function installHelper(
     audit({ route: blocked.route, afterState: before.state, ok: false, output: blocked.output, error: blocked.error });
     return blocked;
   }
-  // A live grant proves the helper is usable, but the sudoers rule only lists
-  // its own subcommands. Replacing the binary needs a real elevation route.
-  // Only a password-auth host has a stored secret `runElevated` can reuse; a
-  // key-auth host needs the password typed for this one install.
+  // A live grant proves the helper is usable, but its sudoers rule may list
+  // only the helper's own subcommands, which cannot replace the binary.
+  // Probe for a general grant first: a host with `NOPASSWD: ALL` can be
+  // reinstalled without a password, and a command-scoped grant is refused with
+  // the reason instead of an attempted install that would fail halfway.
   if (
     !sudoPassword?.trim() &&
     host.authMode !== "password" &&
@@ -522,6 +523,15 @@ export async function installHelper(
     before.route === "nopasswd" &&
     (before.uid ?? 0) !== 0
   ) {
+    const probe = await runRemote(
+      toRunner(store.publicSshHost(host), 20_000),
+      "if sudo -n true >/dev/null 2>&1; then echo nexus-grant=all; else echo nexus-grant=helper-only; fi\n",
+      "sh",
+    );
+    if (/nexus-grant=all/.test(probe.stdout)) {
+      // The account can elevate freely, so runElevated's nopasswd route can
+      // replace both files without a password.
+    } else {
     const refused: HelperInstallResult = {
       hostId: host.id,
       ok: false,
@@ -532,6 +542,7 @@ export async function installHelper(
     };
     audit({ route: refused.route, afterState: before.state, ok: false, output: refused.output, error: refused.error });
     return refused;
+    }
   }
 
   const user = before.user || host.username;

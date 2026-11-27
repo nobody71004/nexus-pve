@@ -6,7 +6,13 @@
 # whole privileged surface is this file: a fixed set of subcommands, validated
 # inputs, no shell evaluation, no caller-supplied command strings.
 #
-#   nexus-priv service <start|stop|restart> <unit>
+#   nexus-priv service <start|stop|restart|enable|disable> <unit>
+#   nexus-priv unit write <name> <base64-body>
+#   nexus-priv unit remove <name>
+#   nexus-priv pkg <install|remove|update|upgrade> [package...]
+#   nexus-priv journal <unit> <lines>
+#   nexus-priv compose <apply|up|down|restart|status|logs|remove> <name> [base64-body|lines]
+#   nexus-priv docker <ps|images|logs|start|stop|restart|rm|pull> [name|image] [lines]
 #   nexus-priv power <reboot|shutdown>
 #   nexus-priv backup <slug> <path> [path...]
 #   nexus-priv gpu setup
@@ -45,7 +51,13 @@ die() {
 usage() {
   cat >&2 <<'EOF'
 usage:
-  nexus-priv service <start|stop|restart> <unit>
+  nexus-priv service <start|stop|restart|enable|disable> <unit>
+  nexus-priv unit write <name> <base64-body>
+  nexus-priv unit remove <name>
+  nexus-priv pkg <install|remove|update|upgrade> [package...]
+  nexus-priv journal <unit> <lines>
+  nexus-priv compose <apply|up|down|restart|status|logs|remove> <name> [base64-body|lines]
+  nexus-priv docker <ps|images|logs|start|stop|restart|rm|pull> [name|image] [lines]
   nexus-priv power <reboot|shutdown>
   nexus-priv backup <slug> <path> [path...]
   nexus-priv gpu setup
@@ -66,6 +78,41 @@ valid_unit() {
     "" | *[!A-Za-z0-9@._:-]*) return 1 ;;
   esac
   return 0
+}
+
+valid_pkg() {
+  case "$1" in
+    "" | *[!a-z0-9+.-]*) return 1 ;;
+  esac
+  case "$1" in
+    [a-z0-9]*) ;;
+    *) return 1 ;;
+  esac
+  [ ${#1} -le 80 ] || return 1
+  return 0
+}
+
+# Compose project / container names: lowercase, digits, dash, underscore.
+valid_project() {
+  case "$1" in
+    "" | *[!a-z0-9_-]*) return 1 ;;
+  esac
+  case "$1" in
+    [a-z0-9]*) ;;
+    *) return 1 ;;
+  esac
+  [ ${#1} -le 41 ] || return 1
+  return 0
+}
+
+decode_b64() {
+  if command -v base64 >/dev/null 2>&1; then
+    base64 -d 2>/dev/null
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl base64 -d -A 2>/dev/null
+  else
+    return 1
+  fi
 }
 
 valid_ip() {
@@ -899,6 +946,237 @@ guard_status() {
   exit 0
 }
 
+# --------------------------------------------------------------- services
+
+UNIT_DIR=/etc/systemd/system
+UNIT_MARK='# managed by nexus-priv'
+COMPOSE_ROOT=/opt/nexus
+
+unit_write() {
+  [ $# -eq 2 ] || usage
+  name=$1
+  body=$2
+  valid_unit "$name" || die "invalid unit name: $name"
+  case "$name" in
+    *.service | *.timer | *.socket | *.path) ;;
+    *) die "unit name must end in .service, .timer, .socket or .path" ;;
+  esac
+  [ ${#name} -le 120 ] || die "unit name is too long (max 120)"
+  target=$UNIT_DIR/$name
+  if [ -f "$target" ] && ! grep -q "^$UNIT_MARK" "$target" 2>/dev/null; then
+    die "$target exists and is not managed by nexus-priv; refusing to overwrite it"
+  fi
+  mkdir -p "$UNIT_DIR" || die "cannot prepare $UNIT_DIR"
+  tmp=$(mktemp) || die "cannot prepare a unit file"
+  printf '%s' "$body" | decode_b64 >"$tmp" || { rm -f "$tmp"; die "unit body is not valid base64"; }
+  [ -s "$tmp" ] || { rm -f "$tmp"; die "unit body is empty"; }
+  size=$(wc -c <"$tmp")
+  [ "$size" -le 65536 ] || { rm -f "$tmp"; die "unit body is too large (max 64 KiB)"; }
+  [ -f "$target" ] && cp -p "$target" "$DEST/$(basename "$target").$(date +%s)" 2>/dev/null || true
+  {
+    printf '%s — written by Nexus PVE, edited in the app\n' "$UNIT_MARK"
+    cat "$tmp"
+  } >"$target.new" || { rm -f "$tmp"; die "cannot write $target"; }
+  chmod 644 "$target.new" 2>/dev/null || true
+  chown root:root "$target.new" 2>/dev/null || true
+  mv "$target.new" "$target" || { rm -f "$tmp"; die "cannot install $target"; }
+  rm -f "$tmp"
+  systemctl daemon-reload || die "systemctl daemon-reload failed"
+  systemctl cat "$name" >/dev/null 2>&1 || die "unit was written but systemd does not recognise $name"
+  printf 'unit=%s\npath=%s\nbytes=%s\n' "$name" "$target" "$size"
+}
+
+unit_remove() {
+  [ $# -eq 1 ] || usage
+  name=$1
+  valid_unit "$name" || die "invalid unit name: $name"
+  target=$UNIT_DIR/$name
+  [ -f "$target" ] || die "no unit file at $target"
+  grep -q "^$UNIT_MARK" "$target" 2>/dev/null || die "$target is not managed by nexus-priv; refusing to remove it"
+  mkdir -p "$DEST" 2>/dev/null || true
+  cp -p "$target" "$DEST/$(basename "$target").$(date +%s)" 2>/dev/null || true
+  systemctl disable --now "$name" >/dev/null 2>&1 || true
+  rm -f "$target" || die "cannot remove $target"
+  systemctl daemon-reload || true
+  systemctl reset-failed "$name" >/dev/null 2>&1 || true
+  printf 'removed=%s\npath=%s\n' "$name" "$target"
+}
+
+pkg_action() {
+  [ $# -ge 1 ] || usage
+  action=$1
+  shift
+  case "$action" in install | remove | update | upgrade) ;; *) usage ;; esac
+  command -v apt-get >/dev/null 2>&1 || die "apt-get is not available on this host"
+  if [ "$action" = install ] || [ "$action" = remove ]; then
+    [ $# -ge 1 ] || die "at least one package name is required"
+    [ $# -le 40 ] || die "at most 40 packages per call"
+    for name do valid_pkg "$name" || die "invalid package name: $name"; done
+  fi
+  log=/tmp/nexus-priv-pkg.log
+  : >"$log" 2>/dev/null || die "cannot write $log"
+  DEBIAN_FRONTEND=noninteractive
+  export DEBIAN_FRONTEND
+  printf 'action=%s packages=%s\n' "$action" "$*"
+  rc=0
+  case "$action" in
+    install)
+      apt-get update -qq -o DPkg::Lock::Timeout=180 >>"$log" 2>&1 || printf 'warning: apt-get update failed; using the existing index\n'
+      out=$(apt-get -y -o DPkg::Lock::Timeout=180 \
+        -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+        install "$@" 2>&1)
+      rc=$?
+      ;;
+    remove)
+      out=$(apt-get -y -o DPkg::Lock::Timeout=180 remove "$@" 2>&1)
+      rc=$?
+      ;;
+    update)
+      out=$(apt-get update -o DPkg::Lock::Timeout=180 2>&1)
+      rc=$?
+      ;;
+    upgrade)
+      apt-get update -qq -o DPkg::Lock::Timeout=180 >>"$log" 2>&1 || true
+      out=$(apt-get -y -o DPkg::Lock::Timeout=180 \
+        -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+        upgrade 2>&1)
+      rc=$?
+      ;;
+  esac
+  printf '%s\n' "$out" >>"$log" 2>/dev/null
+  if [ "$rc" -ne 0 ]; then
+    printf 'package %s failed (rc=%s)\n' "$action" "$rc"
+    printf '%s\n' "$out" | tail -20
+    printf '%s\n' "$out" | grep -E '^(E:|dpkg: error|Errors were)' | tail -5
+    rm -f "$log"
+    exit 9
+  fi
+  printf '%s\n' "$out" | grep -E '^(Setting up|Removing|Unpacking|Hit:|Get:|Reading|Building|Calculating)' | tail -12
+  for name do
+    printf '  %s=%s\n' "$name" "$(dpkg-query -W -f='${Status} ${Version}' "$name" 2>/dev/null || echo 'not installed')"
+  done
+  rm -f "$log"
+  if [ -f /var/run/reboot-required ]; then
+    printf 'reboot_required=yes\n'
+  else
+    printf 'reboot_required=no\n'
+  fi
+}
+
+journal_read() {
+  [ $# -eq 2 ] || usage
+  name=$1
+  lines=$2
+  valid_unit "$name" || die "invalid unit name: $name"
+  case "$lines" in "" | *[!0-9]*) die "line count must be a number" ;; esac
+  [ "$lines" -le 500 ] || lines=500
+  journalctl -u "$name" -n "$lines" --no-pager -o short-iso 2>&1 | tail -n "$lines"
+}
+
+compose_bin() {
+  command -v docker >/dev/null 2>&1 || die "docker is not installed on this host"
+  docker compose version >/dev/null 2>&1 ||
+    die "the docker compose plugin is missing (apt-get install docker-compose-v2)"
+}
+
+compose_file() {
+  printf '%s/%s/compose.yml' "$COMPOSE_ROOT" "$1"
+}
+
+compose_apply() {
+  [ $# -eq 2 ] || usage
+  name=$1
+  body=$2
+  valid_project "$name" || die "invalid project name: $name"
+  compose_bin
+  dir=$COMPOSE_ROOT/$name
+  file=$dir/compose.yml
+  mkdir -p "$dir" || die "cannot create $dir"
+  chmod 700 "$dir" 2>/dev/null || true
+  tmp=$file.new
+  printf '%s' "$body" | decode_b64 >"$tmp" || { rm -f "$tmp"; die "compose body is not valid base64"; }
+  [ -s "$tmp" ] || { rm -f "$tmp"; die "compose body is empty"; }
+  size=$(wc -c <"$tmp")
+  [ "$size" -le 65536 ] || { rm -f "$tmp"; die "compose body is too large (max 64 KiB)"; }
+  grep -Eq '^[[:space:]]*services:' "$tmp" || { rm -f "$tmp"; die "compose body has no services: key"; }
+  chmod 600 "$tmp"
+  [ -f "$file" ] && cp -p "$file" "$file.bak-$(date +%s)" 2>/dev/null || true
+  mv "$tmp" "$file" || die "cannot install $file"
+  printf 'project=%s\nfile=%s\nbytes=%s\n' "$name" "$file" "$size"
+  out=$(docker compose -f "$file" up -d --remove-orphans 2>&1)
+  rc=$?
+  printf '%s\n' "$out" | tail -25
+  docker compose -f "$file" ps 2>/dev/null | tail -15 || true
+  exit "$rc"
+}
+
+compose_action() {
+  [ $# -ge 1 ] || usage
+  action=$1
+  shift
+  [ $# -ge 1 ] || usage
+  name=$1
+  valid_project "$name" || die "invalid project name: $name"
+  compose_bin
+  file=$(compose_file "$name")
+  [ -f "$file" ] || die "no compose project at $file"
+  case "$action" in
+    up) out=$(docker compose -f "$file" up -d --remove-orphans 2>&1) ;;
+    down) out=$(docker compose -f "$file" down 2>&1) ;;
+    restart) out=$(docker compose -f "$file" restart 2>&1) ;;
+    status) out=$(docker compose -f "$file" ps 2>&1) ;;
+    logs) out=$(docker compose -f "$file" logs --tail "${2:-40}" 2>&1) ;;
+    remove)
+      out=$(docker compose -f "$file" down -v --remove-orphans 2>&1)
+      rc=$?
+      rm -f "$file".bak-* "$file"
+      rmdir "$COMPOSE_ROOT/$name" 2>/dev/null || true
+      printf 'project=%s removed\n' "$name"
+      printf '%s\n' "$out" | tail -25
+      exit "$rc"
+      ;;
+    *) usage ;;
+  esac
+  rc=$?
+  printf '%s\n' "$out" | tail -40
+  exit "$rc"
+}
+
+docker_admin() {
+  [ $# -ge 1 ] || usage
+  sub=$1
+  shift
+  command -v docker >/dev/null 2>&1 || die "docker is not installed on this host"
+  case "$sub" in
+    ps)
+      out=$(docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>&1)
+      ;;
+    images)
+      out=$(docker images --format 'table {{.Repository}}:{{.Tag}}\t{{.Size}}' 2>&1)
+      ;;
+    pull)
+      [ $# -ge 1 ] || usage
+      image=$1
+      case "$image" in "" | *[!A-Za-z0-9._/:@-]*) die "invalid image reference: $image" ;; esac
+      out=$(docker pull "$image" 2>&1)
+      ;;
+    logs | start | stop | restart | rm)
+      [ $# -ge 1 ] || usage
+      name=$1
+      valid_project "$name" || die "invalid container name: $name"
+      case "$sub" in
+        logs) out=$(docker logs --tail "${2:-40}" "$name" 2>&1) ;;
+        rm) out=$(docker rm -f "$name" 2>&1) ;;
+        *) out=$(docker "$sub" "$name" 2>&1) ;;
+      esac
+      ;;
+    *) usage ;;
+  esac
+  rc=$?
+  printf '%s\n' "$out" | tail -40
+  exit "$rc"
+}
+
 cmd=${1:-}
 if [ $# -gt 0 ]; then shift; fi
 
@@ -907,15 +1185,66 @@ service)
   [ $# -eq 2 ] || usage
   action=$1
   unit=$2
-  case "$action" in start | stop | restart) ;; *) usage ;; esac
+  case "$action" in start | stop | restart | enable | disable) ;; *) usage ;; esac
   valid_unit "$unit" || die "invalid unit name: $unit"
   systemctl cat "$unit" >/dev/null 2>&1 || die "unknown unit: $unit"
-  systemctl "$action" "$unit"
+  systemctl "$action" "$unit" 2>&1
   rc=$?
   state=$(systemctl is-active "$unit" 2>&1 || true)
-  printf 'unit=%s\naction=%s\nstate=%s\n' "$unit" "$action" "$state"
-  if [ "$rc" -ne 0 ]; then exit "$rc"; fi
-  if [ "$action" != stop ] && [ "$state" != active ]; then exit 3; fi
+  enabled=$(systemctl is-enabled "$unit" 2>&1 || true)
+  printf 'unit=%s\naction=%s\nstate=%s\nenabled=%s\nsystemctl_rc=%s\n' \
+    "$unit" "$action" "$state" "$enabled" "$rc"
+  # The resulting state is the authority, not systemctl's exit code: a unit
+  # backed by a SysV init script returns 1 from `disable` (update-rc.d) while
+  # doing exactly what was asked, and reporting that as a failure is a lie.
+  case "$action" in
+    start | restart)
+      [ "$state" = active ] || exit 3
+      ;;
+    stop)
+      [ "$state" != active ] || exit 3
+      ;;
+    enable)
+      case "$enabled" in enabled*) ;; *) exit 3 ;; esac
+      ;;
+    disable)
+      case "$enabled" in disabled*) ;; *) exit 3 ;; esac
+      ;;
+  esac
+  exit 0
+  ;;
+unit)
+  [ $# -ge 1 ] || usage
+  sub=$1
+  shift
+  case "$sub" in
+    write) unit_write "$@" ;;
+    remove) unit_remove "$@" ;;
+    *) usage ;;
+  esac
+  exit 0
+  ;;
+pkg)
+  pkg_action "$@"
+  exit 0
+  ;;
+journal)
+  journal_read "$@"
+  exit 0
+  ;;
+compose)
+  [ $# -ge 1 ] || usage
+  sub=$1
+  shift
+  case "$sub" in
+    apply) compose_apply "$@" ;;
+    up | down | restart | status | logs | remove) compose_action "$sub" "$@" ;;
+    *) usage ;;
+  esac
+  exit 0
+  ;;
+docker)
+  docker_admin "$@"
   exit 0
   ;;
 power)

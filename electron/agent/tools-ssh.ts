@@ -5,7 +5,7 @@ import { runRemote } from "../ssh/probe";
 import { actOnSshHost, runSpeedTest, runSpeedTestAll } from "../ssh/actions";
 import { checkHelper, installHelper } from "../ssh/helper";
 
-function resolveSshHost(ctx: ToolContext, args: Record<string, unknown>): string {
+export function resolveSshHost(ctx: ToolContext, args: Record<string, unknown>): string {
   const requested = typeof args.host === "string" && args.host.trim() ? args.host.trim() : undefined;
   const hosts = ctx.store.sshHosts();
   if (hosts.length === 0) throw new Error("No Linux hosts configured. Add one in Nexus PVE → Linux hosts.");

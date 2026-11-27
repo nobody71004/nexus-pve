@@ -9,7 +9,7 @@ import type { ToolContext } from "./agent/registry";
  * It runs headless and shares the same config/vault as the desktop app, so an
  * agent can drive Proxmox (and build this app) with the window closed.
  */
-const VERSION = "1.1.0";
+const VERSION = "1.2.0";
 const PROTOCOL = "2024-11-05";
 const appRoot = path.resolve(__dirname, "..");
 
@@ -69,6 +69,19 @@ not read. audit.tail shows every mutation already applied by this agent.
 Linux hosts: ssh.hosts, ssh.status, ssh.speedtest, ssh.helper are safe reads. ssh.helper.install
 installs the root helper and sudoers drop-in (gated). ssh.power, ssh.service, ssh.backup and
 ssh.exec are gated too.
+Service install and lifecycle (the way to add a service a host does not have yet):
+ssh.services is a safe read of every systemd unit (active/enabled), failed unit, docker container
+and compose project. ssh.service.status and ssh.service.logs are safe reads too.
+ssh.service.install apt-installs a package and then enables and starts the unit it ships;
+ssh.service.create writes a unit from an exec line, enables and starts it;
+ssh.service.remove deletes a unit Nexus wrote (refusing distro units); ssh.pkg runs apt
+install/remove/update/upgrade; ssh.docker applies and manages docker compose projects under
+/opt/nexus and lists or controls containers. ssh.service.control does start/stop/restart/
+enable/disable. All of those mutations and removals require "confirm": true, and every
+privileged step runs through /usr/local/sbin/nexus-priv, so a key-only host needs the helper
+installed and current (ssh.helper, ssh.helper.install). A package whose unit name differs
+from its package name needs "unit"; when no unit matches, the install says so rather than
+reporting a service that is not running.
 Machine control spans Linux hosts and Proxmox nodes: machines.list is a safe read. machines.exec
 runs a command over SSH on either target (a Proxmox node must have a matching Linux host).
 machines.vnc.preflight is a safe read; machines.vnc.setup installs the loopback terminal
