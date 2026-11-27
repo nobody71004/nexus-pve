@@ -3,14 +3,23 @@
    ========================================================================== */
 
 .auth-app {
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  /* Ultrawide and high-DPI screens can leave the window shorter than the join
+     card. Scroll the shell instead of clipping its footer out of reach. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .auth-bar {
   height: 54px;
   flex: 0 0 54px;
+  position: sticky;
+  top: 0;
   display: flex;
   align-items: center;
   gap: 18px;
@@ -19,7 +28,6 @@
   background: linear-gradient(180deg, rgba(10, 16, 26, 0.94), rgba(7, 11, 19, 0.72));
   backdrop-filter: blur(22px);
   -webkit-app-region: drag;
-  position: relative;
   z-index: 5;
 }
 .auth-bar .window-controls,
@@ -48,7 +56,6 @@
 .auth-main {
   position: relative;
   z-index: 1;
-  flex: 1;
   min-height: 0;
   width: min(1120px, calc(100% - 48px));
   margin: 0 auto;
@@ -57,6 +64,10 @@
   align-items: center;
   gap: clamp(36px, 8vw, 110px);
   padding: 48px 0;
+  /* Grow with the card (never squash it) so the shell scrolls instead. */
+  flex: 1 0 auto;
+  align-content: center;
+  overflow: hidden;
 }
 
 .auth-card {
@@ -954,6 +965,31 @@
   color: #ffb3c1;
   background: rgba(255, 60, 90, 0.06);
   font-size: 10.5px;
+}
+
+@media (max-height: 800px) {
+  .auth-main {
+    padding: 20px 0;
+    gap: 32px;
+  }
+  .auth-card {
+    padding: 24px 26px 20px;
+  }
+  .auth-glyph {
+    width: 44px;
+    height: 44px;
+    margin-bottom: 14px;
+  }
+  .auth-card h1 {
+    font-size: clamp(21px, 2.4vw, 27px);
+  }
+  .auth-lede {
+    margin: 8px 0 16px;
+  }
+  .auth-footnote {
+    margin-top: 14px;
+    padding-top: 12px;
+  }
 }
 
 @media (max-width: 1100px) {

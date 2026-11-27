@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { BrowserWindow, Menu, app, dialog, session } from "electron";
+import { BrowserWindow, Menu, app, dialog, screen, session } from "electron";
 import type { NexusEvent } from "../shared/types";
 import { IPC } from "../shared/ipc";
 import { registerIpc } from "./ipc";
@@ -147,6 +147,23 @@ async function attachSmokeReport(win: BrowserWindow): Promise<void> {
   });
 }
 
+/**
+ * Keep the frameless window inside the usable desktop. Ultrawide and scaled
+ * displays can restore a window taller or wider than the work area, which puts
+ * the footer and the join button out of reach below the screen edge.
+ */
+function fitToWorkArea(win: BrowserWindow): void {
+  if (win.isDestroyed() || win.isMaximized() || win.isFullScreen()) return;
+  const bounds = win.getBounds();
+  const area = screen.getDisplayMatching(bounds).workArea;
+  const width = Math.min(bounds.width, area.width);
+  const height = Math.min(bounds.height, area.height);
+  const x = Math.min(Math.max(bounds.x, area.x), area.x + area.width - width);
+  const y = Math.min(Math.max(bounds.y, area.y), area.y + area.height - height);
+  if (width === bounds.width && height === bounds.height && x === bounds.x && y === bounds.y) return;
+  win.setBounds({ x, y, width, height });
+}
+
 function createWindow(): void {
   window = new BrowserWindow({
     width: 1680,
@@ -168,6 +185,7 @@ function createWindow(): void {
   });
 
   applyUiScale(window);
+  fitToWorkArea(window);
   window.webContents.on("did-finish-load", () => {
     if (window && !window.isDestroyed()) applyUiScale(window);
   });
@@ -253,6 +271,15 @@ app.whenReady().then(async () => {
   }
 
   createWindow();
+  screen.on("display-metrics-changed", () => {
+    if (window) fitToWorkArea(window);
+  });
+  screen.on("display-added", () => {
+    if (window) fitToWorkArea(window);
+  });
+  screen.on("display-removed", () => {
+    if (window) fitToWorkArea(window);
+  });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
